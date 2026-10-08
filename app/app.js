@@ -238,23 +238,30 @@ function renderInput(card, onInput) {
   const common = { class: 'field big', value, enterkeyhint: 'next', oninput: onInput, onchange: onInput };
   if (card.type === 'date') return el('input', { ...common, type: 'date' });
   if (card.type === 'time') return el('input', { ...common, type: 'time' });
+  // 前回値がある項目は、空のまま Enter で前回値を入れられることを案内する
+  const placeholder = canUsePrev(card) ? `Enter で前回値 ${card.prev}` : card.rangeText || (card.type === 'number' ? '数値' : '');
   if (card.type === 'number') {
-    return el('input', { ...common, type: 'text', inputmode: 'decimal', autocomplete: 'off', placeholder: card.rangeText || '数値' });
+    return el('input', { ...common, type: 'text', inputmode: 'decimal', autocomplete: 'off', placeholder });
   }
-  return el('input', { ...common, type: 'text', autocomplete: 'off', list: card.kind === 'meta' ? 'names' : undefined });
+  return el('input', { ...common, type: 'text', autocomplete: 'off', placeholder, list: card.kind === 'meta' ? 'names' : undefined });
 }
+
+const canUsePrev = (card) => card.kind === 'item' && !card.locked && card.prev !== '';
 
 function renderCard(card) {
   const status = el('div', { class: 'status' });
   const node = el('div', { class: 'card', dataset: { row: card.row } });
   node._card = card;
+  const prevBadge = el('span', { class: 'badge prev-badge' }, '前回値');
   const refresh = () => {
     const j = judge(card, S.session.values[card.row]);
     node.dataset.state = j.state;
     status.textContent = j.msg || '';
+    prevBadge.hidden = !S.session.fromPrev[card.row];
   };
   const onInput = (e) => {
     S.session.values[card.row] = e.target.value;
+    delete S.session.fromPrev[card.row];
     if (card.kind === 'meta' && /名前|氏名|点検者|担当/.test(card.label)) localStorage.setItem('lastName', e.target.value);
     refresh();
     updateProgress();
@@ -263,13 +270,25 @@ function renderCard(card) {
   const input = renderInput(card, onInput);
   if (input.tagName === 'INPUT') {
     input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); focusNext(card); }
+      if (e.key !== 'Enter' || e.isComposing) return;
+      e.preventDefault();
+      // 空のまま Enter = 前回値で確定 (ありがちな「前回と同じ」を 1 打で)
+      if (!input.value.trim() && canUsePrev(card)) {
+        input.value = card.prev;
+        S.session.values[card.row] = card.prev;
+        S.session.fromPrev[card.row] = true;
+        refresh();
+        updateProgress();
+        scheduleSave();
+      }
+      focusNext(card);
     });
     input.addEventListener('blur', applyFilterLater);
   }
   add(node, [
     el('div', { class: 'card-head' },
       el('div', { class: 'card-title' }, card.label, card.code ? el('span', { class: 'code' }, card.code) : null),
+      prevBadge,
       el('div', { class: 'card-ref' }, card.ref),
     ),
     card.kind === 'item'
@@ -316,6 +335,7 @@ function jumpToFirstEmpty() {
 
 function showCards() {
   const { session, cards } = S;
+  session.fromPrev ??= {}; // 前回値で確定した行 (旧バージョンの保存データには無い)
   setHeader(session.fileName, [
     el('button', { class: 'btn ghost', onclick: () => { flushSave(); showHome(); } }, '一覧'),
     el('button', { class: 'btn primary', onclick: showExport }, '書き出し'),
@@ -370,6 +390,7 @@ async function showExport() {
   const { session, wb, sheet, cards } = S;
   const empty = editableCards().filter((c) => judge(c, session.values[c.row]).state === 'empty');
   const ng = cards.items.filter((c) => judge(c, session.values[c.row]).state === 'ng');
+  const fromPrev = cards.items.filter((c) => session.fromPrev?.[c.row] && session.values[c.row] === c.prev);
   let result;
   try {
     result = await exportWorkbook(wb, sheet, cards, session.values);
@@ -423,6 +444,7 @@ async function showExport() {
       el('h2', {}, 'Excel に書き出し'),
       el('p', {}, `${colName(cards.targetCol)}列に ${result.written.length} セル書き込みます。`),
       empty.length ? el('p', { class: 'warn' }, `未入力が ${empty.length} 件あります (空欄のまま書き出します)。`) : null,
+      fromPrev.length ? el('p', {}, `前回値のまま確定: ${fromPrev.length} 件`) : null,
       ng.length ? el('div', { class: 'ng-list' },
         el('p', { class: 'error' }, `管理値外が ${ng.length} 件あります:`),
         el('ul', {}, ng.map((c) => el('li', {}, `${c.section ? c.section + ' / ' : ''}${c.label}: ${session.values[c.row]} (管理値 ${c.rangeText})`)))) : null,

@@ -136,6 +136,7 @@ main { max-width: 900px; margin: 0 auto; padding: 16px 16px calc(env(safe-area-i
 .locked-value { font-size: 20px; font-weight: 600; display: flex; gap: 8px; align-items: center; min-height: 48px; }
 .badge { font-size: 12px; font-weight: 600; background: var(--chip); color: var(--muted); border-radius: 6px; padding: 1px 8px; }
 .badge.ok { background: var(--ok-bg); color: var(--ok); }
+.prev-badge { align-self: center; border: 1px dashed var(--muted); background: transparent; }
 .bottom-space { height: 40vh; }
 
 .error { color: var(--ng); font-weight: 600; }

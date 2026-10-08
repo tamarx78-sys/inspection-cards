@@ -1,0 +1,18 @@
+# 許可リスト方式: ここに列挙したもの以外は Git に入れない
+# (フォルダ直下の個人メモ・点検表などを誤って公開しないため)
+/*
+!/.gitignore
+!/README.md
+!/.github/
+!/app/
+!/dev/
+
+dev/*
+!dev/serve.py
+!dev/verify.py
+!dev/make_icons.py
+
+# 点検表 (実データ・ダミーとも) はどこにあっても入れない
+*.xlsx
+*.xlsm
+*.xls

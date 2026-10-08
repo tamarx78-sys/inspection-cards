@@ -238,8 +238,7 @@ function renderInput(card, onInput) {
   const common = { class: 'field big', value, enterkeyhint: 'next', oninput: onInput, onchange: onInput };
   if (card.type === 'date') return el('input', { ...common, type: 'date' });
   if (card.type === 'time') return el('input', { ...common, type: 'time' });
-  // 前回値がある項目は、空のまま Enter で前回値を入れられることを案内する
-  const placeholder = canUsePrev(card) ? `Enter で前回値 ${card.prev}` : card.rangeText || (card.type === 'number' ? '数値' : '');
+  const placeholder = card.rangeText || (card.type === 'number' ? '数値' : '');
   if (card.type === 'number') {
     return el('input', { ...common, type: 'text', inputmode: 'decimal', autocomplete: 'off', placeholder });
   }

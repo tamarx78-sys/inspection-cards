@@ -13,11 +13,16 @@
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="stylesheet" href="style.css">
+<script>
+  // 文字サイズは描画前に反映 (ちらつき防止)
+  try { const s = localStorage.getItem('textSize'); if (s) document.documentElement.dataset.size = s; } catch {}
+</script>
 </head>
 <body>
 <header class="topbar">
   <h1 id="title">点検カード</h1>
   <span id="net" class="net"></span>
+  <button id="size" class="btn ghost size-btn" aria-label="文字サイズ"></button>
   <div id="actions" class="actions"></div>
 </header>
 <main id="main"></main>

@@ -463,6 +463,35 @@ async function showExport() {
   document.body.append(dlg);
 }
 
+// ---------------- 文字サイズ・画面の向き ----------------
+const SIZES = [['', '標準'], ['l', '大'], ['xl', '特大']];
+function applySize(key) {
+  if (key) document.documentElement.dataset.size = key;
+  else delete document.documentElement.dataset.size;
+  try { localStorage.setItem('textSize', key); } catch {}
+  $('#size').replaceChildren('A', el('small', {}, SIZES.find(([k]) => k === key)[1]));
+  updateTopbarH();
+}
+$('#size').addEventListener('click', () => {
+  const cur = document.documentElement.dataset.size || '';
+  const i = SIZES.findIndex(([k]) => k === cur);
+  const [key, label] = SIZES[(i + 1) % SIZES.length];
+  // 拡大後も、今見ているカードが画面内に残るようにする
+  const focused = document.activeElement?.closest?.('.card');
+  applySize(key);
+  focused?.scrollIntoView({ block: 'center' });
+  toast(`文字サイズ: ${label}`);
+});
+applySize(document.documentElement.dataset.size || '');
+
+// ヘッダーの高さ (文字サイズ・回転で変わる) に合わせて、ツールバーの固定位置をずらす
+function updateTopbarH() {
+  document.documentElement.style.setProperty('--topbar-h', `${$('.topbar').getBoundingClientRect().height}px`);
+}
+new ResizeObserver(updateTopbarH).observe($('.topbar'));
+window.addEventListener('resize', updateTopbarH);
+updateTopbarH();
+
 // ---------------- 起動 ----------------
 function updateOnline() {
   $('#net').textContent = navigator.onLine ? '' : 'オフライン';

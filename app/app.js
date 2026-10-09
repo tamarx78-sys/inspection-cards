@@ -1,7 +1,12 @@
 import {
   openWorkbook, loadSheet, detectLayout, buildCards, exportWorkbook, toCellValue, colName, displayValue,
 } from './xlsx.js';
-import { putSession, getSession, deleteSession, listSessions, requestPersist } from './store.js';
+import {
+  parseProfile, profileMatches, buildProfileCards, conditionValues, isApplicable,
+} from './profile.js';
+import {
+  putSession, getSession, deleteSession, listSessions, requestPersist, putProfile, deleteProfile, listProfiles,
+} from './store.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const main = $('#main');
@@ -25,9 +30,10 @@ const mount = (...children) => { main.replaceChildren(); add(main, children); };
 const pad = (n) => String(n).padStart(2, '0');
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 const nowTime = () => { const d = new Date(); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+const norm = (s) => String(s ?? '').normalize('NFKC').replace(/\s+/g, '').trim();
 
 // 現在の作業状態
-let S = null; // { session, wb, sheet, layout, cards, filter }
+let S = null; // { session, wb, sheet, cards, filter }
 
 function toast(msg, kind = '') {
   const t = el('div', { class: `toast ${kind}` }, msg);
@@ -38,19 +44,32 @@ function toast(msg, kind = '') {
 
 function setHeader(title, actions = []) {
   $('#title').textContent = title;
-  const a = $('#actions');
-  a.replaceChildren(...actions);
+  $('#actions').replaceChildren(...actions);
+}
+
+/** セッション (設定ファイルの有無) に応じてカード一式を作る */
+async function makeCards(wb, sheetName, profile, targetCol) {
+  const meta = wb.sheets.find((s) => s.name === sheetName);
+  if (!meta) throw new Error(`シート「${sheetName}」が見つかりません`);
+  const sheet = await loadSheet(wb, meta);
+  if (profile) return { sheet, cards: buildProfileCards(sheet, profile, targetCol) };
+  const layout = detectLayout(sheet);
+  return { sheet, cards: buildCards(sheet, layout, targetCol ?? layout.targetCol), layout };
 }
 
 // ---------------- ホーム ----------------
 async function showHome() {
   S = null;
   setHeader('点検カード');
-  const sessions = await listSessions();
+  const [sessions, profiles] = await Promise.all([listSessions(), listProfiles()]);
   const fileInput = el('input', {
     type: 'file',
     accept: '.xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12',
     class: 'hidden', onchange: (e) => e.target.files[0] && openFile(e.target.files[0]),
+  });
+  const profileInput = el('input', {
+    type: 'file', accept: '.json,application/json', class: 'hidden',
+    onchange: (e) => e.target.files[0] && importProfile(e.target.files[0]),
   });
   mount(
     el('section', { class: 'home' },
@@ -69,7 +88,7 @@ async function showHome() {
                 s.exportedAt ? el('span', { class: 'badge ok' }, '書き出し済') : null),
             ),
             el('button', {
-              class: 'btn ghost danger', title: '削除',
+              class: 'btn ghost danger',
               onclick: async () => {
                 if (!confirm(`「${s.fileName}」の作業データを削除しますか?\n(元の Excel ファイルには影響しません)`)) return;
                 await deleteSession(s.id);
@@ -79,102 +98,153 @@ async function showHome() {
           );
         }),
       ),
+      el('h2', {}, '設定ファイル'),
+      el('p', { class: 'hint' }, '点検表と同じフォルダにある設定ファイル (.json) を読み込むと、その点検表専用のカードになります。'),
+      el('div', { class: 'session-list' },
+        profiles.map((p) => el('div', { class: 'session' },
+          el('div', { class: 'session-main' },
+            el('div', { class: 'session-name' }, p.name),
+            el('div', { class: 'session-sub' }, `読み込み ${new Date(p.importedAt).toLocaleString('ja-JP')}`)),
+          el('button', {
+            class: 'btn ghost danger',
+            onclick: async () => {
+              if (!confirm(`設定「${p.name}」をこの端末から削除しますか?`)) return;
+              await deleteProfile(p.id);
+              showHome();
+            },
+          }, '削除')))),
+      el('button', { class: 'btn', onclick: () => profileInput.click() }, '⚙ 設定ファイルを読み込む'),
+      profileInput,
     ),
   );
+}
+
+async function importProfile(file) {
+  try {
+    const p = parseProfile(await file.text());
+    await putProfile(p);
+    requestPersist();
+    toast(`設定「${p.name}」を読み込みました`, 'ok');
+    showHome();
+  } catch (e) {
+    console.error(e);
+    toast(`設定ファイルを読み込めませんでした: ${e.message}`, 'error');
+  }
 }
 
 async function openFile(file) {
   try {
     const bytes = await file.arrayBuffer();
     const wb = await openWorkbook(bytes);
-    showSetup({ fileName: file.name, bytes, wb });
+    const profiles = (await listProfiles()).filter((p) => profileMatches(p, wb, file.name));
+    showSetup({ fileName: file.name, bytes, wb, profiles });
   } catch (e) {
     console.error(e);
     toast(`読み込めませんでした: ${e.message}`, 'error');
   }
 }
 
-// ---------------- 対象シート・列の選択 ----------------
-async function showSetup({ fileName, bytes, wb }) {
+// ---------------- 設定・書き込む列の選択 ----------------
+async function showSetup({ fileName, bytes, wb, profiles }) {
   setHeader(fileName, [el('button', { class: 'btn ghost', onclick: showHome }, '戻る')]);
+  const profileSel = el('select', { class: 'field' },
+    profiles.map((p, i) => el('option', { value: i }, p.name)),
+    el('option', { value: '' }, '設定なし (自動判定)'));
   const sheetSel = el('select', { class: 'field' }, wb.sheets.map((s, i) => el('option', { value: i }, s.name)));
+  const sheetLbl = el('label', { class: 'lbl' }, 'シート', sheetSel);
   const colSel = el('select', { class: 'field' });
   const info = el('div', { class: 'setup-info' });
   const startBtn = el('button', { class: 'btn primary big' }, '入力をはじめる');
-  let sheet, layout;
+  let current = null; // { profile, sheetName, sheet, cards }
 
-  async function refreshSheet() {
-    sheet = await loadSheet(wb, wb.sheets[+sheetSel.value]);
+  async function refresh() {
+    const profile = profileSel.value === '' ? null : profiles[+profileSel.value];
+    sheetLbl.hidden = !!profile || wb.sheets.length < 2;
+    const sheetName = profile ? profile.sheet : wb.sheets[+sheetSel.value].name;
     try {
-      layout = detectLayout(sheet);
+      const { sheet, cards } = await makeCards(wb, sheetName, profile);
+      current = { profile, sheetName, sheet, cards };
     } catch (e) {
-      layout = null;
+      current = null;
       info.replaceChildren(el('p', { class: 'error' }, e.message));
       colSel.replaceChildren();
       startBtn.disabled = true;
       return;
     }
+    const { sheet, cards } = current;
     startBtn.disabled = false;
-    const dateRow = layout.metaRows.find((m) => m.type === 'date')?.row;
-    const opts = layout.recordCols.map((c) => {
+    const dateRow = cards.meta.find((m) => m.type === 'date')?.row;
+    const recordCols = cards.recordCols || [];
+    const nextCol = cards.nextCol ?? cards.targetCol;
+    const opts = recordCols.map((c) => {
       const d = dateRow ? displayValue(sheet.get(dateRow, c)) : '';
       return el('option', { value: c }, `${colName(c)}列 ${d ? `(${d})` : ''} - 空欄のみ追記`);
     });
-    opts.push(el('option', { value: layout.targetCol, selected: true }, `${colName(layout.targetCol)}列 (新しい記録)`));
+    opts.push(el('option', { value: nextCol, selected: true }, `${colName(nextCol)}列 (新しい記録)`));
     colSel.replaceChildren(...opts);
-    const cards = buildCards(sheet, layout, layout.targetCol);
     const sections = new Set(cards.items.map((c) => c.section).filter(Boolean));
-    info.replaceChildren(
+    info.replaceChildren();
+    add(info, [
       el('dl', {},
-        el('dt', {}, '基本情報'), el('dd', {}, layout.metaRows.map((m) => m.label).join('・') || '-'),
+        el('dt', {}, 'シート'), el('dd', {}, sheetName),
+        el('dt', {}, '基本情報'), el('dd', {}, cards.meta.map((m) => m.label).join('・') || '-'),
         el('dt', {}, '点検項目'), el('dd', {}, `${cards.items.length}件 (${sections.size}区分)`),
-        el('dt', {}, '列の判定'), el('dd', {}, layout.columns.map((c) => `${colName(c.c)}:${c.header || '区分'}`).join(' / ')),
+        cards.conditions.length ? [el('dt', {}, '条件'), el('dd', {}, cards.conditions.map((c) => c.label).join('・'))] : null,
         el('dt', {}, '前回の記録'), el('dd', {}, cards.prevCol ? `${colName(cards.prevCol)}列` : 'なし'),
       ),
-    );
+      cards.warnings.length ? el('div', { class: 'warn-box' },
+        el('p', { class: 'warn' }, '設定ファイルと表が合わない箇所があります。該当する振り分けは使わず、行をすべて表示します:'),
+        el('ul', {}, cards.warnings.map((w) => el('li', {}, w)))) : null,
+    ]);
   }
 
-  sheetSel.addEventListener('change', refreshSheet);
+  profileSel.addEventListener('change', refresh);
+  sheetSel.addEventListener('change', refresh);
   startBtn.addEventListener('click', async () => {
     const targetCol = +colSel.value;
-    const cards = buildCards(sheet, layout, targetCol);
+    const { profile, sheetName } = current;
+    const { sheet, cards } = await makeCards(wb, sheetName, profile, targetCol);
     const values = {};
     // 基本情報は今日の日付・現在時刻・前回の名前で埋めておく
     for (const m of cards.meta) {
       if (m.locked) continue;
       if (m.type === 'date') values[m.row] = today();
       else if (m.type === 'time') values[m.row] = nowTime();
-      else if (/名前|氏名|点検者|担当/.test(m.label)) values[m.row] = localStorage.getItem('lastName') || '';
+      else if (m.type === 'name') values[m.row] = localStorage.getItem('lastName') || '';
     }
     const session = {
-      id: `${Date.now()}`, fileName, bytes, sheetName: sheet.name, targetCol, values, createdAt: Date.now(),
+      id: `${Date.now()}`, fileName, bytes, sheetName, targetCol, values, profile, cond: {}, auto: {}, fromPrev: {},
+      createdAt: Date.now(),
     };
+    S = { session, wb, sheet, cards, filter: 'all' };
+    applyConditionWrites();
     await putSession(session);
     requestPersist();
-    S = { session, wb, sheet, layout, cards, filter: 'all' };
     showCards();
   });
 
   mount(
     el('section', { class: 'setup' },
-      wb.sheets.length > 1 ? el('label', { class: 'lbl' }, 'シート', sheetSel) : null,
+      profiles.length ? el('label', { class: 'lbl' }, '設定', profileSel) : null,
+      sheetLbl,
       el('label', { class: 'lbl' }, '書き込む列', colSel),
       info,
       startBtn,
     ),
   );
-  await refreshSheet();
+  if (!profiles.length) profileSel.value = '';
+  await refresh();
 }
 
 async function resume(id) {
   try {
     const session = await getSession(id);
     const wb = await openWorkbook(session.bytes);
-    const meta = wb.sheets.find((s) => s.name === session.sheetName) || wb.sheets[0];
-    const sheet = await loadSheet(wb, meta);
-    const layout = detectLayout(sheet);
-    const cards = buildCards(sheet, layout, session.targetCol);
-    S = { session, wb, sheet, layout, cards, filter: 'all' };
+    const { sheet, cards } = await makeCards(wb, session.sheetName, session.profile || null, session.targetCol);
+    session.cond ??= {};
+    session.auto ??= {};
+    session.fromPrev ??= {};
+    S = { session, wb, sheet, cards, filter: 'all' };
     showCards();
   } catch (e) {
     console.error(e);
@@ -182,7 +252,7 @@ async function resume(id) {
   }
 }
 
-// ---------------- カード入力 ----------------
+// ---------------- 保存 ----------------
 let saveTimer = null;
 function scheduleSave() {
   clearTimeout(saveTimer);
@@ -193,29 +263,62 @@ const flushSave = () => { if (S && saveTimer) { clearTimeout(saveTimer); saveTim
 document.addEventListener('visibilitychange', () => document.visibilityState === 'hidden' && flushSave());
 window.addEventListener('pagehide', flushSave);
 
+// ---------------- 判定 ----------------
 function judge(card, raw) {
   if (card.locked) return { state: 'locked' };
   const s = String(raw ?? '').trim();
   if (!s) return { state: 'empty' };
+  if (card.type === 'choice') {
+    const set = card.setText;
+    if (set && card.options?.some((o) => norm(o) === norm(set)) && norm(s) !== norm(set)) {
+      return { state: 'ng', msg: `設定 (${set}) と違います${card.effect ? ` / 影響: ${card.effect}` : ''}` };
+    }
+    return { state: 'ok' };
+  }
   if (card.type === 'number') {
     const v = toCellValue('number', s);
     if (v.kind !== 'n') return { state: 'warn', msg: '数値ではありません (文字として書き込みます)' };
     const { range } = card;
     if (range && ((range.min !== undefined && v.v < range.min) || (range.max !== undefined && v.v > range.max))) {
-      return { state: 'ng', msg: `管理値外${card.contact ? ` → ${card.contact}へ連絡` : ''}` };
+      if (card.rangeKind === 'reference') return { state: 'warn', msg: '参考範囲から外れています' };
+      return { state: 'ng', msg: `${S.cards.ngMessage}${card.effect ? ` / 影響: ${card.effect}` : ''}` };
+    }
+    const decimals = (s.normalize('NFKC').split('.')[1] || '').length;
+    if (card.digits !== null && card.digits !== undefined && decimals > card.digits) {
+      return { state: 'warn', msg: `小数点以下は ${card.digits} 桁です` };
     }
   }
   return { state: 'ok' };
 }
 
-function editableCards() {
-  return [...S.cards.meta, ...S.cards.items].filter((c) => !c.locked);
+// ---------------- 条件による振り分け ----------------
+const condValues = () => conditionValues(S.cards, S.session);
+const applicable = (card) => card.kind === 'meta' || isApplicable(card, S.cards, condValues());
+
+/** 選択式の条件の「記入先」セルに、選んだ選択肢を書く */
+function applyConditionWrites() {
+  const { session, cards } = S;
+  const cv = condValues();
+  for (const cd of cards.conditions) {
+    for (const [opt, row] of Object.entries(cd.writes || {})) {
+      if (cv[cd.key] === opt) {
+        if (!String(session.values[row] ?? '').trim()) { session.values[row] = opt; session.auto[row] = true; }
+      } else if (session.auto[row]) {
+        delete session.values[row];
+        delete session.auto[row];
+      }
+    }
+  }
+}
+
+function targetCards() {
+  return [...S.cards.meta, ...S.cards.items].filter((c) => !c.locked && applicable(c));
 }
 
 function updateProgress() {
-  const list = editableCards();
+  const list = targetCards();
   const done = list.filter((c) => judge(c, S.session.values[c.row]).state !== 'empty').length;
-  const ng = S.cards.items.filter((c) => judge(c, S.session.values[c.row]).state === 'ng').length;
+  const ng = list.filter((c) => judge(c, S.session.values[c.row]).state === 'ng').length;
   $('#progress-text').textContent = `${done} / ${list.length}`;
   $('#progress-bar').style.width = `${list.length ? (done / list.length) * 100 : 0}%`;
   $('#ng-count').textContent = ng ? `管理値外 ${ng}` : '';
@@ -224,50 +327,102 @@ function updateProgress() {
 function applyFilter() {
   for (const node of main.querySelectorAll('.card[data-row]')) {
     const card = node._card;
+    node._refresh?.();
     const j = judge(card, S.session.values[card.row]);
-    const show = S.filter === 'all' || (S.filter === 'empty' && j.state === 'empty') || (S.filter === 'ng' && j.state === 'ng');
+    const show = applicable(card) && (
+      S.filter === 'all' || (S.filter === 'empty' && j.state === 'empty') || (S.filter === 'ng' && j.state === 'ng'));
     node.hidden = !show;
   }
+  for (const node of main.querySelectorAll('.card.cond')) node.hidden = S.filter !== 'all';
   for (const sec of main.querySelectorAll('.section')) {
     sec.hidden = ![...sec.querySelectorAll('.card')].some((c) => !c.hidden);
   }
 }
 
-function renderInput(card, onInput) {
+// ---------------- カード ----------------
+function setValue(card, value, { fromPrev = false } = {}) {
+  const { session } = S;
+  session.values[card.row] = value;
+  if (fromPrev) session.fromPrev[card.row] = true;
+  else delete session.fromPrev[card.row];
+  delete session.auto[card.row];
+  if (card.type === 'name') localStorage.setItem('lastName', value);
+  scheduleSave();
+  if (card.conditionSource) applyFilter(); // 条件の元になる項目が変わると、対象の行が変わる
+  updateProgress();
+}
+
+function renderInput(card, refresh) {
   const value = S.session.values[card.row] ?? '';
   if (card.locked) return el('div', { class: 'locked-value' }, card.existing, el('span', { class: 'badge' }, '記入済'));
+  if (card.type === 'choice') {
+    const group = el('div', { class: 'choices' });
+    const paint = () => {
+      const cur = norm(S.session.values[card.row]);
+      for (const b of group.children) b.classList.toggle('on', norm(b.dataset.v) === cur);
+    };
+    for (const o of card.options) {
+      group.append(el('button', {
+        class: `choice ${norm(o) === norm(card.prev) ? 'prev' : ''}`, dataset: { v: o }, type: 'button',
+        onclick: () => {
+          const same = norm(S.session.values[card.row]) === norm(o);
+          setValue(card, same ? '' : o);
+          paint();
+          refresh();
+          if (!same) focusNext(card, { scroll: false });
+        },
+      }, o));
+    }
+    paint();
+    group._paint = paint;
+    return group;
+  }
+  const onInput = (e) => { setValue(card, e.target.value); refresh(); };
   const common = { class: 'field big', value, enterkeyhint: 'next', oninput: onInput, onchange: onInput };
   if (card.type === 'date') return el('input', { ...common, type: 'date' });
   if (card.type === 'time') return el('input', { ...common, type: 'time' });
-  const placeholder = card.rangeText || (card.type === 'number' ? '数値' : '');
+  // 管理値はチップに出しているので、入力欄には重ねて出さない
+  const placeholder = card.type === 'number' && !card.rangeText && !card.setText ? '数値' : '';
   if (card.type === 'number') {
     return el('input', { ...common, type: 'text', inputmode: 'decimal', autocomplete: 'off', placeholder });
   }
-  return el('input', { ...common, type: 'text', autocomplete: 'off', placeholder, list: card.kind === 'meta' ? 'names' : undefined });
+  return el('input', { ...common, type: 'text', autocomplete: 'off', placeholder, list: card.type === 'name' ? 'names' : undefined });
 }
 
-const canUsePrev = (card) => card.kind === 'item' && !card.locked && card.prev !== '';
+const canUsePrev = (card) => card.kind === 'item' && !card.locked && card.prev !== '' && card.type !== 'choice';
+
+function cardChips(card) {
+  if (card.kind !== 'item') return null;
+  const chips = card.chips.map((c) => el('span', { class: 'chip where' }, c));
+  if (card.rangeKind === 'range') chips.push(el('span', { class: 'chip range' }, `管理 ${card.rangeText}`));
+  else if (card.rangeKind === 'reference') chips.push(el('span', { class: 'chip ref' }, `参考 ${card.rangeText}`));
+  if (card.setText && card.type !== 'choice') chips.push(el('span', { class: 'chip' }, `設定 ${card.setText}`));
+  else if (card.setText && card.type === 'choice') chips.push(el('span', { class: 'chip range' }, `設定 ${card.setText}`));
+  if (!card.rangeKind && card.kindText && card.type !== 'choice' && !/[～~]/.test(card.kindText)) {
+    chips.push(el('span', { class: 'chip' }, card.kindText));
+  }
+  if (card.prev) chips.push(el('span', { class: 'chip prev' }, `前回 ${card.prev}`));
+  return el('div', { class: 'chips' }, chips);
+}
 
 function renderCard(card) {
   const status = el('div', { class: 'status' });
-  const node = el('div', { class: 'card', dataset: { row: card.row } });
+  const node = el('div', { class: `card ${card.type === 'choice' ? 'is-choice' : ''}`, dataset: { row: card.row } });
   node._card = card;
   const prevBadge = el('span', { class: 'badge prev-badge' }, '前回値');
+  const autoBadge = el('span', { class: 'badge prev-badge' }, '自動');
+  let input;
   const refresh = () => {
     const j = judge(card, S.session.values[card.row]);
     node.dataset.state = j.state;
     status.textContent = j.msg || '';
     prevBadge.hidden = !S.session.fromPrev[card.row];
+    autoBadge.hidden = !S.session.auto[card.row];
+    if (input?._paint) input._paint();
+    else if (input?.tagName === 'INPUT' && document.activeElement !== input) input.value = S.session.values[card.row] ?? '';
   };
-  const onInput = (e) => {
-    S.session.values[card.row] = e.target.value;
-    delete S.session.fromPrev[card.row];
-    if (card.kind === 'meta' && /名前|氏名|点検者|担当/.test(card.label)) localStorage.setItem('lastName', e.target.value);
-    refresh();
-    updateProgress();
-    scheduleSave();
-  };
-  const input = renderInput(card, onInput);
+  node._refresh = refresh;
+  input = renderInput(card, refresh);
   if (input.tagName === 'INPUT') {
     input.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter' || e.isComposing) return;
@@ -275,11 +430,8 @@ function renderCard(card) {
       // 空のまま Enter = 前回値で確定 (ありがちな「前回と同じ」を 1 打で)
       if (!input.value.trim() && canUsePrev(card)) {
         input.value = card.prev;
-        S.session.values[card.row] = card.prev;
-        S.session.fromPrev[card.row] = true;
+        setValue(card, card.prev, { fromPrev: true });
         refresh();
-        updateProgress();
-        scheduleSave();
       }
       focusNext(card);
     });
@@ -287,23 +439,47 @@ function renderCard(card) {
   }
   add(node, [
     el('div', { class: 'card-head' },
-      el('div', { class: 'card-title' }, card.label, card.code ? el('span', { class: 'code' }, card.code) : null),
-      prevBadge,
+      el('div', { class: 'card-title' },
+        card.watch ? el('span', { class: 'watch', title: '監視項目' }, '●') : null,
+        card.label,
+        card.sub ? el('span', { class: 'code' }, card.sub) : null,
+        card.unit ? el('span', { class: 'code' }, `[${card.unit}]`) : null),
+      prevBadge, autoBadge,
       el('div', { class: 'card-ref' }, card.ref),
     ),
-    card.kind === 'item'
-      ? el('div', { class: 'chips' },
-        card.rangeText ? el('span', { class: 'chip range' }, `管理値 ${card.rangeText}`) : null,
-        card.contact ? el('span', { class: 'chip' }, card.contact) : null,
-        card.extra.map((x) => el('span', { class: 'chip' }, `${x.label} ${x.value}`)),
-        card.prev ? el('span', { class: 'chip prev' }, `前回 ${card.prev}`) : null,
-      )
-      : null,
+    cardChips(card),
     input,
     status,
   ]);
   refresh();
   return node;
+}
+
+/** 選択式の条件カード (どちらかの系統だけを入力する場合など) */
+function renderConditionCard(cd) {
+  const group = el('div', { class: 'choices' });
+  const paint = () => {
+    const cur = condValues()[cd.key];
+    for (const b of group.children) b.classList.toggle('on', b.dataset.v === cur);
+  };
+  for (const o of cd.options) {
+    group.append(el('button', {
+      class: 'choice', dataset: { v: o }, type: 'button',
+      onclick: () => {
+        S.session.cond[cd.key] = o;
+        applyConditionWrites();
+        scheduleSave();
+        paint();
+        applyFilter();
+        updateProgress();
+      },
+    }, o));
+  }
+  paint();
+  return el('div', { class: 'card cond' },
+    el('div', { class: 'card-head' }, el('div', { class: 'card-title' }, `${cd.label} を選択`)),
+    el('div', { class: 'hint' }, '選んだ側の項目だけを入力します'),
+    group);
 }
 
 // 入力中にカードが消えないよう、フィルタ反映はフォーカスが外れてから
@@ -315,15 +491,19 @@ function applyFilterLater() {
   }, 400);
 }
 
-function focusNext(card) {
+function focusNext(card, { scroll = true } = {}) {
   const nodes = [...main.querySelectorAll('.card[data-row]')].filter((n) => !n.hidden);
   const i = nodes.findIndex((n) => n._card === card);
-  for (const n of nodes.slice(i + 1)) {
-    const inp = n.querySelector('input');
-    if (inp) { inp.focus(); n.scrollIntoView({ block: 'center', behavior: 'smooth' }); return; }
+  const next = nodes.slice(i + 1).find((n) => !n._card.locked);
+  if (!next) {
+    document.activeElement?.blur?.();
+    toast('最後の項目です');
+    return;
   }
-  document.activeElement.blur();
-  toast('最後の項目です');
+  const inp = next.querySelector('input');
+  if (inp) inp.focus({ preventScroll: true });
+  else document.activeElement?.blur?.(); // 選択式はキーボードを閉じてボタンで選ぶ
+  if (scroll || !inp) next.scrollIntoView({ block: 'center', behavior: 'smooth' });
 }
 
 function jumpToFirstEmpty() {
@@ -335,7 +515,6 @@ function jumpToFirstEmpty() {
 
 function showCards() {
   const { session, cards } = S;
-  session.fromPrev ??= {}; // 前回値で確定した行 (旧バージョンの保存データには無い)
   setHeader(session.fileName, [
     el('button', { class: 'btn ghost', onclick: () => { flushSave(); showHome(); } }, '一覧'),
     el('button', { class: 'btn primary', onclick: showExport }, '書き出し'),
@@ -353,11 +532,18 @@ function showCards() {
       },
     }, label));
 
+  // 項目と条件カードを並べ、工程 (区分) ごとにまとめる
+  const selectConds = cards.conditions.filter((c) => c.kind === 'select');
   const groups = [];
-  for (const c of cards.items) {
+  const push = (name, node, own = false) => {
     const last = groups[groups.length - 1];
-    if (last && last.name === c.section) last.cards.push(c);
-    else groups.push({ name: c.section, cards: [c] });
+    if (!own && last && !last.own && last.name === name) last.nodes.push(node);
+    else groups.push({ name, nodes: [node], own });
+  };
+  for (const cd of selectConds.filter((c) => !c.placeBefore)) push(cd.label, renderConditionCard(cd), true);
+  for (const c of cards.items) {
+    for (const cd of selectConds.filter((x) => x.placeBefore === c.row)) push(cd.label, renderConditionCard(cd), true);
+    push(c.section, renderCard(c));
   }
 
   mount(
@@ -372,12 +558,13 @@ function showCards() {
         el('div', { class: 'segs' }, filterBtns),
         el('button', { class: 'btn ghost', onclick: jumpToFirstEmpty }, '未入力へ ↓')),
     ),
+    cards.warnings.length ? el('p', { class: 'warn' }, `設定ファイルと合わない箇所が ${cards.warnings.length} 件あります (開くときの画面で確認できます)`) : null,
     el('div', { class: 'section' },
       el('h2', { class: 'section-title' }, '基本情報'),
       el('div', { class: 'cards' }, cards.meta.map(renderCard))),
     groups.map((g) => el('div', { class: 'section' },
       el('h2', { class: 'section-title' }, g.name || '項目'),
-      el('div', { class: 'cards' }, g.cards.map(renderCard)))),
+      el('div', { class: 'cards' }, g.nodes))),
     el('div', { class: 'bottom-space' }),
   );
   updateProgress();
@@ -388,12 +575,14 @@ function showCards() {
 async function showExport() {
   flushSave();
   const { session, wb, sheet, cards } = S;
-  const empty = editableCards().filter((c) => judge(c, session.values[c.row]).state === 'empty');
-  const ng = cards.items.filter((c) => judge(c, session.values[c.row]).state === 'ng');
-  const fromPrev = cards.items.filter((c) => session.fromPrev?.[c.row] && session.values[c.row] === c.prev);
+  const list = targetCards();
+  const empty = list.filter((c) => judge(c, session.values[c.row]).state === 'empty');
+  const ng = list.filter((c) => judge(c, session.values[c.row]).state === 'ng');
+  const fromPrev = list.filter((c) => session.fromPrev?.[c.row] && session.values[c.row] === c.prev);
+  const skipped = cards.items.filter((c) => !c.locked && !applicable(c) && String(session.values[c.row] ?? '').trim());
   let result;
   try {
-    result = await exportWorkbook(wb, sheet, cards, session.values);
+    result = await exportWorkbook(wb, sheet, cards.targetCol, list, session.values);
   } catch (e) {
     toast(e.message, 'error');
     return;
@@ -438,6 +627,7 @@ async function showExport() {
   };
   const canShare = !!navigator.canShare?.({ files });
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const where = (c) => `${c.section ? `${c.section} / ` : ''}${c.label}${c.sub ? ` ${c.sub}` : ''}`;
 
   const dlg = el('div', { class: 'modal-bg' },
     el('div', { class: 'modal' },
@@ -445,9 +635,10 @@ async function showExport() {
       el('p', {}, `${colName(cards.targetCol)}列に ${result.written.length} セル書き込みます。`),
       empty.length ? el('p', { class: 'warn' }, `未入力が ${empty.length} 件あります (空欄のまま書き出します)。`) : null,
       fromPrev.length ? el('p', {}, `前回値のまま確定: ${fromPrev.length} 件`) : null,
+      skipped.length ? el('p', {}, `条件の対象外になった入力 ${skipped.length} 件は書き込みません。`) : null,
       ng.length ? el('div', { class: 'ng-list' },
         el('p', { class: 'error' }, `管理値外が ${ng.length} 件あります:`),
-        el('ul', {}, ng.map((c) => el('li', {}, `${c.section ? c.section + ' / ' : ''}${c.label}: ${session.values[c.row]} (管理値 ${c.rangeText})`)))) : null,
+        el('ul', {}, ng.map((c) => el('li', {}, `${where(c)}: ${session.values[c.row]}${c.rangeText ? ` (管理 ${c.rangeText})` : c.setText ? ` (設定 ${c.setText})` : ''}`)))) : null,
       el('div', { class: 'files' },
         el('div', {}, el('span', { class: 'badge ok' }, '記入済'), ' ', name),
         el('div', {}, el('span', { class: 'badge' }, '元の状態'), ' ', backupName)),
@@ -482,7 +673,6 @@ $('#size').addEventListener('click', () => {
   focused?.scrollIntoView({ block: 'center' });
   toast(`文字サイズ: ${label}`);
 });
-applySize(document.documentElement.dataset.size || '');
 
 // ヘッダーの高さ (文字サイズ・回転で変わる) に合わせて、ツールバーの固定位置をずらす
 function updateTopbarH() {
@@ -490,7 +680,7 @@ function updateTopbarH() {
 }
 new ResizeObserver(updateTopbarH).observe($('.topbar'));
 window.addEventListener('resize', updateTopbarH);
-updateTopbarH();
+applySize(document.documentElement.dataset.size || '');
 
 // ---------------- 起動 ----------------
 function updateOnline() {
@@ -510,4 +700,4 @@ if (typeof DecompressionStream === 'undefined') {
 }
 
 // 開発用フック (自動テストからファイルを読み込ませる)
-window.__app = { openFile, showHome, get state() { return S; } };
+window.__app = { openFile, importProfile, showHome, get state() { return S; } };

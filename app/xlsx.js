@@ -131,9 +131,36 @@ export async function loadSheet(wb, sheet) {
     const [a, b] = m.getAttribute('ref').split(':').map(parseRef);
     return { r1: a.r, c1: a.c, r2: (b || a).r, c2: (b || a).c };
   });
+  const parseRanges = (sqref) => (sqref || '').split(/\s+/).filter(Boolean).map((part) => {
+    const [a, b] = part.split(':').map(parseRef);
+    return a ? { r1: a.r, c1: a.c, r2: (b || a).r, c2: (b || a).c } : null;
+  }).filter(Boolean);
+  // 入力規則 (プルダウン) の選択肢。同じシート内の範囲か "a,b,c" 形式のみ対応
+  const validations = all(doc, 'dataValidation')
+    .filter((v) => v.getAttribute('type') === 'list')
+    .map((v) => ({
+      ranges: parseRanges(v.getAttribute('sqref')),
+      formula: (first(v, 'formula1')?.textContent || '').trim(),
+    }));
   const sheetObj = {
     ...sheet, xml: text, cells, merges, maxR, maxC,
     get(r, c) { return cells.get(key(r, c)) || null; },
+    validationOptions(r, c) {
+      const v = validations.find((x) => x.ranges.some((m) => r >= m.r1 && r <= m.r2 && c >= m.c1 && c <= m.c2));
+      if (!v) return null;
+      if (v.formula.startsWith('"')) return v.formula.slice(1, -1).split(',').map((s) => s.trim()).filter(Boolean);
+      if (v.formula.includes('!')) return null; // 他シート参照は未対応
+      const [a, b] = v.formula.split(':').map(parseRef);
+      if (!a) return null;
+      const out = [];
+      for (let rr = a.r; rr <= (b || a).r; rr++) {
+        for (let cc = a.c; cc <= (b || a).c; cc++) {
+          const s = displayValue(this.get(rr, cc)).trim();
+          if (s) out.push(s);
+        }
+      }
+      return out.length ? out : null;
+    },
     /** 結合セルを考慮した値 (結合範囲内なら左上の値) */
     valueAt(r, c) {
       const m = merges.find((m) => r >= m.r1 && r <= m.r2 && c >= m.c1 && c <= m.c2);
@@ -276,28 +303,36 @@ export function buildCards(sheet, layout, targetCol) {
     };
   };
 
-  const meta = layout.metaRows.map((m) => mk(m.row, { kind: 'meta', label: m.label, type: m.type }));
+  const meta = layout.metaRows.map((m) => mk(m.row, {
+    kind: 'meta', label: m.label, type: m.type === 'text' && /名前|氏名|点検者|担当/.test(m.label) ? 'name' : m.type, chips: [],
+  }));
   const items = layout.itemRows.map((r) => {
     const rangeText = role(r, 'range');
     const range = parseRange(rangeText);
     const prevCell = prevCol ? sheet.get(r, prevCol) : null;
     const extra = layout.columns
       .filter((x) => x.role === 'other')
-      .map((x) => ({ label: x.header, value: displayValue(sheet.valueAt(r, x.c)) }))
-      .filter((x) => x.value);
+      .map((x) => [x.header, displayValue(sheet.valueAt(r, x.c))])
+      .filter(([, v]) => v)
+      .map(([h, v]) => `${h} ${v}`);
+    const options = sheet.validationOptions(r, targetCol);
+    const contact = role(r, 'contact');
     return mk(r, {
       kind: 'item',
       section: role(r, 'section'),
       label: role(r, 'name') || `${r}行目`,
-      code: role(r, 'code'),
-      rangeText: rangeText && rangeText !== '-' ? rangeText : '',
+      sub: role(r, 'code'),
+      rangeText: range && rangeText !== '-' ? rangeText : '',
       range,
-      contact: role(r, 'contact'),
-      extra,
-      type: typeFromCell(prevCell, range ? 'number' : 'text'),
+      rangeKind: range ? 'range' : null,
+      effect: contact ? `${contact}へ連絡` : '',
+      chips: [contact, ...extra].filter(Boolean),
+      options,
+      type: options ? 'choice' : typeFromCell(prevCell, range ? 'number' : 'text'),
+      cond: {},
     });
   });
-  return { meta, items, prevCol, targetCol };
+  return { meta, items, conditions: [], warnings: [], prevCol, targetCol, ngMessage: '管理値外' };
 }
 
 // ---- 書き戻し ----
@@ -441,14 +476,14 @@ export function patchSheetXml(xml, updates) {
   return { xml: result, written };
 }
 
-/** 入力値を書き込んだ xlsx の Blob を作る */
-export async function exportWorkbook(wb, sheet, cards, values) {
+/** 入力値を書き込んだ xlsx の Blob を作る (cardList: 書き込む対象のカード) */
+export async function exportWorkbook(wb, sheet, targetCol, cardList, values) {
   const updates = [];
-  for (const card of [...cards.meta, ...cards.items]) {
+  for (const card of cardList) {
     if (card.locked) continue;
     const val = toCellValue(card.type, values[card.row]);
     if (!val) continue;
-    updates.push({ row: card.row, col: cards.targetCol, style: card.style, val });
+    updates.push({ row: card.row, col: targetCol, style: card.style, val });
   }
   if (!updates.length) throw new Error('書き込む値がありません');
   const { xml, written } = patchSheetXml(sheet.xml, updates);

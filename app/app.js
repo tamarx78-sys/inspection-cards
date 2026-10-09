@@ -48,7 +48,8 @@ async function showHome() {
   setHeader('点検カード');
   const sessions = await listSessions();
   const fileInput = el('input', {
-    type: 'file', accept: '.xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    type: 'file',
+    accept: '.xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12',
     class: 'hidden', onchange: (e) => e.target.files[0] && openFile(e.target.files[0]),
   });
   mount(

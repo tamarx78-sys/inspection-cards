@@ -464,7 +464,7 @@ function renderCard(card) {
       el('div', { class: 'card-title' },
         card.watch ? el('span', { class: 'watch', title: '監視項目' }, '●') : null,
         card.label,
-        card.sub ? el('span', { class: 'code' }, card.sub) : null,
+        card.sub && !card.hideSub ? el('span', { class: 'code' }, card.sub) : null,
         card.unit ? el('span', { class: 'code' }, `[${card.unit}]`) : null),
       card.optional ? el('span', { class: 'badge' }, '任意') : null,
       prevBadge, autoBadge,
@@ -560,14 +560,31 @@ function showCards() {
   const groups = [];
   const push = (name, node, own = false, compact = false) => {
     const last = groups[groups.length - 1];
-    if (!own && last && !last.own && last.name === name && last.compact === compact) last.nodes.push(node);
+    if (!own && last && !last.own && !last.split && last.name === name && last.compact === compact) last.nodes.push(node);
     else groups.push({ name, nodes: [node], own, compact });
+  };
+  // 列分け表示: 値ごとの一覧を横に並べる (幅が足りなければ縦に積む)
+  const pushSplit = (name, card, node) => {
+    const last = groups[groups.length - 1];
+    let g = last?.split?.id === card.split.id ? last : null;
+    if (!g) { g = { name, split: { id: card.split.id, lists: new Map() } }; groups.push(g); }
+    if (!g.split.lists.has(card.split.key)) g.split.lists.set(card.split.key, []);
+    g.split.lists.get(card.split.key).push(node);
   };
   for (const cd of selectConds.filter((c) => !c.placeBefore)) push(cd.label, renderConditionCard(cd), true);
   for (const c of cards.items) {
     for (const cd of selectConds.filter((x) => x.placeBefore === c.row)) push(cd.label, renderConditionCard(cd), true);
-    push(c.section, renderCard(c), false, !!c.compact);
+    if (c.split) pushSplit(c.section, c, renderCard(c));
+    else push(c.section, renderCard(c), false, !!c.compact);
   }
+  const renderGroupBody = (g) => {
+    if (g.split) {
+      return el('div', { class: 'split' }, [...g.split.lists].map(([key, nodes]) => el('div', { class: 'split-col' },
+        el('div', { class: 'split-head' }, key || '-'),
+        el('div', { class: 'compact-list' }, nodes))));
+    }
+    return el('div', { class: g.compact ? 'compact-list' : 'cards' }, g.nodes);
+  };
 
   mount(
     names,
@@ -587,7 +604,7 @@ function showCards() {
       el('div', { class: 'cards' }, cards.meta.map(renderCard))),
     groups.map((g) => el('div', { class: 'section' },
       el('h2', { class: 'section-title' }, g.name || '項目'),
-      el('div', { class: g.compact ? 'compact-list' : 'cards' }, g.nodes))),
+      renderGroupBody(g))),
     el('div', { class: 'bottom-space' }),
   );
   updateProgress();

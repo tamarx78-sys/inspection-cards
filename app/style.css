@@ -164,6 +164,11 @@ main { max-width: 1400px; margin: 0 auto; padding: 16px 16px calc(env(safe-area-
   gap: 2px 12px; padding: 6px 12px; border: 0; border-radius: 0; border-bottom: 1px solid var(--line);
 }
 .card.compact:last-child { border-bottom: 0; }
+/* 列分け表示: 幅があれば横並び、狭ければ縦に積む */
+.split { display: grid; gap: 10px 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); }
+.split .compact-list { max-width: none; }
+.split-head { font-weight: 700; font-size: 0.9375rem; margin: 0 4px 6px; color: var(--primary); }
+.split-col:not(:has(.card:not([hidden]))) { display: none; }
 .card.compact > .card-head, .card.compact > .chips { grid-column: 1; }
 .card.compact > .field, .card.compact > .choices, .card.compact > .locked-value { grid-column: 2; grid-row: 1 / span 2; }
 .card.compact > .status { grid-column: 1 / -1; }

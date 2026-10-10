@@ -176,6 +176,22 @@ export function buildProfileCards(sheet, profile, targetCol) {
     if (c) c.compact = true;
   }
 
+  // 列分け表示: 指定した列の値 (例: 左右・系統) ごとに分け、それぞれを一覧表示で縦に並べる。
+  // 入力の順番は「1 つ目の値の行を上から下へ → 2 つ目の値の行…」になるよう並べ替える
+  const splitOrder = new Map(); // 行 → 並べ替え後の順番キー
+  (profile.splitGroups || []).forEach((g, gi) => {
+    const members = (g.rows || []).map((ref) => resolve(ref, '列分け表示の行')).filter(Boolean);
+    const keys = g.order || [...new Set(members.map((c) => c[g.by || 'sub']))];
+    for (const c of members) {
+      const key = c[g.by || 'sub'] || '';
+      c.compact = true;
+      c.split = { id: gi, key };
+      if ((g.by || 'sub') === 'sub') c.hideSub = true; // 見出しに出すので行の表示からは省く
+      const ki = keys.indexOf(key);
+      splitOrder.set(c.row, [gi, ki < 0 ? keys.length : ki]);
+    }
+  });
+
   // 任意入力の行 (空欄でも未入力として数えない)
   for (const ref of profile.optionalRows || []) {
     const c = resolve(ref, '任意入力の行');
@@ -241,9 +257,22 @@ export function buildProfileCards(sheet, profile, targetCol) {
     conditions.push(cond);
   }
 
+  // 列分け表示のかたまりは、最初の行の位置にまとめて置き、値ごとの順に並べ替える
+  const ordered = [];
+  const placed = new Set();
+  for (const c of items) {
+    const so = splitOrder.get(c.row);
+    if (!so) { ordered.push(c); continue; }
+    if (placed.has(so[0])) continue;
+    placed.add(so[0]);
+    const group = items.filter((x) => splitOrder.get(x.row)?.[0] === so[0]);
+    group.sort((a, b) => splitOrder.get(a.row)[1] - splitOrder.get(b.row)[1] || a.row - b.row);
+    ordered.push(...group);
+  }
+
   return {
     meta,
-    items: items.filter((c) => !excluded.has(c.row)),
+    items: ordered.filter((c) => !excluded.has(c.row)),
     conditions,
     warnings,
     recordCols,

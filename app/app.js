@@ -311,14 +311,18 @@ function applyConditionWrites() {
   }
 }
 
+/** 書き込み対象のカード (任意入力を含む) */
 function targetCards() {
   return [...S.cards.meta, ...S.cards.items].filter((c) => !c.locked && applicable(c));
 }
+/** 入力が必要なカード (任意入力を除く)。進み具合と未入力の数え方に使う */
+const requiredCards = () => targetCards().filter((c) => !c.optional);
+const isEmptyRequired = (c) => !c.optional && judge(c, S.session.values[c.row]).state === 'empty';
 
 function updateProgress() {
-  const list = targetCards();
+  const list = requiredCards();
   const done = list.filter((c) => judge(c, S.session.values[c.row]).state !== 'empty').length;
-  const ng = list.filter((c) => judge(c, S.session.values[c.row]).state === 'ng').length;
+  const ng = targetCards().filter((c) => judge(c, S.session.values[c.row]).state === 'ng').length;
   $('#progress-text').textContent = `${done} / ${list.length}`;
   $('#progress-bar').style.width = `${list.length ? (done / list.length) * 100 : 0}%`;
   $('#ng-count').textContent = ng ? `管理値外 ${ng}` : '';
@@ -330,7 +334,7 @@ function applyFilter() {
     node._refresh?.();
     const j = judge(card, S.session.values[card.row]);
     const show = applicable(card) && (
-      S.filter === 'all' || (S.filter === 'empty' && j.state === 'empty') || (S.filter === 'ng' && j.state === 'ng'));
+      S.filter === 'all' || (S.filter === 'empty' && isEmptyRequired(card)) || (S.filter === 'ng' && j.state === 'ng'));
     node.hidden = !show;
   }
   for (const node of main.querySelectorAll('.card.cond')) node.hidden = S.filter !== 'all';
@@ -446,6 +450,7 @@ function renderCard(card) {
         card.label,
         card.sub ? el('span', { class: 'code' }, card.sub) : null,
         card.unit ? el('span', { class: 'code' }, `[${card.unit}]`) : null),
+      card.optional ? el('span', { class: 'badge' }, '任意') : null,
       prevBadge, autoBadge,
       el('div', { class: 'card-ref' }, card.ref),
     ),
@@ -509,7 +514,7 @@ function focusNext(card, { scroll = true } = {}) {
 }
 
 function jumpToFirstEmpty() {
-  const node = [...main.querySelectorAll('.card[data-row]')].find((n) => !n.hidden && n.dataset.state === 'empty');
+  const node = [...main.querySelectorAll('.card[data-row]')].find((n) => !n.hidden && isEmptyRequired(n._card));
   if (!node) { toast('未入力の項目はありません', 'ok'); return; }
   node.scrollIntoView({ block: 'center', behavior: 'smooth' });
   node.querySelector('input')?.focus({ preventScroll: true });
@@ -578,7 +583,7 @@ async function showExport() {
   flushSave();
   const { session, wb, sheet, cards } = S;
   const list = targetCards();
-  const empty = list.filter((c) => judge(c, session.values[c.row]).state === 'empty');
+  const empty = list.filter(isEmptyRequired);
   const ng = list.filter((c) => judge(c, session.values[c.row]).state === 'ng');
   const fromPrev = list.filter((c) => session.fromPrev?.[c.row] && session.values[c.row] === c.prev);
   const skipped = cards.items.filter((c) => !c.locked && !applicable(c) && String(session.values[c.row] ?? '').trim());

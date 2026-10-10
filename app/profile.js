@@ -127,8 +127,10 @@ export function buildProfileCards(sheet, profile, targetCol) {
       const probe = [setText, b.prev].filter(Boolean).map(norm);
       options = (profile.choiceSets || []).find((set) => set.some((o) => probe.includes(norm(o)))) || null;
     }
+    // 単位がある行・数値の設定値や範囲がある行は数値入力 (iPad で数字キーボードを出す)
+    const unit = text(at(r, 'unit'));
     const type = options ? 'choice'
-      : (num(setText) !== null || min !== null || max !== null || num(b.prev) !== null) ? 'number' : 'text';
+      : (unit || num(setText) !== null || min !== null || max !== null || num(b.prev) !== null) ? 'number' : 'text';
 
     return {
       ...b,
@@ -137,7 +139,7 @@ export function buildProfileCards(sheet, profile, targetCol) {
       section,
       label: name || `${r}行目`,
       sub,
-      unit: text(at(r, 'unit')),
+      unit,
       watch: !!text(at(r, 'watch')),
       chips: [text(at(r, 'where'))].filter(Boolean),
       setText,
@@ -170,6 +172,12 @@ export function buildProfileCards(sheet, profile, targetCol) {
   for (const ref of profile.compactRows || []) {
     const c = resolve(ref, '一覧表示の行');
     if (c) c.compact = true;
+  }
+
+  // 任意入力の行 (空欄でも未入力として数えない)
+  for (const ref of profile.optionalRows || []) {
+    const c = resolve(ref, '任意入力の行');
+    if (c) c.optional = true;
   }
 
   // 対象外の行

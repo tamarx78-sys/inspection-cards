@@ -93,7 +93,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 16px 16px calc(env(safe-area-
   font: inherit; font-size: 1.0625rem; color: var(--text); background: var(--surface);
   border: 1.5px solid var(--line); border-radius: 10px; padding: 10px 12px; width: 100%; min-height: 3rem;
 }
-.field:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 25%, transparent); }
+.field:focus, .field.keypad-target { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 25%, transparent); }
 .field.big { font-size: 1.5rem; font-weight: 600; min-height: 3.75rem; font-variant-numeric: tabular-nums; }
 .setup-info dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
 .setup-info dt { color: var(--muted); }

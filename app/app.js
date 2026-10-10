@@ -522,12 +522,13 @@ function focusNext(card, { scroll = true, back = false } = {}) {
   if (!next) {
     if (back) { toast('最初の項目です'); return; }
     document.activeElement?.blur?.();
+    keypad.hide();
     toast('最後の項目です');
     return;
   }
   const inp = next.querySelector('input');
   if (inp) inp.focus({ preventScroll: true });
-  else document.activeElement?.blur?.(); // 選択式はキーボードを閉じてボタンで選ぶ
+  else { document.activeElement?.blur?.(); keypad.hide(); } // 選択式はキーボードを閉じてボタンで選ぶ
   if (scroll || !inp) next.scrollIntoView({ block: 'center', behavior: 'smooth' });
 }
 
@@ -699,9 +700,10 @@ async function showExport() {
 // ---------------- テンキー ----------------
 // iPad の Safari は inputmode="decimal" でもテンキーにならない (通常のキーボードの数字段が出るだけ) ため、
 // 数値入力欄 (data-keypad) にフォーカスしている間は画面下にアプリのテンキーを出す。
+// フォーカスが外れても閉じない (iPad の Safari はスクロール中のタップなどでフォーカスを外すことがあるため)。
+// 閉じるのは「閉じる」・ほかの入力欄へ移ったとき・選択式を押したとき・数値欄でない項目へ移ったときだけ。
 const keypad = (() => {
   let target = null;
-  let hideTimer;
   let fixTimer;
   const label = el('div', { class: 'keypad-label' });
   const edit = (fn) => {
@@ -721,7 +723,7 @@ const keypad = (() => {
     // 戻る / 進む: 値には触れずに前後の項目へ移るだけ
     prev: () => { const card = target.closest('.card')?._card; if (card) focusNext(card, { back: true }); },
     next: () => { const card = target.closest('.card')?._card; if (card) focusNext(card); },
-    close: () => target.blur(),
+    close: () => { target.blur(); hide(); },
   };
   const key = (text, act, cls = '') => el('button', { type: 'button', class: `key ${cls}`, dataset: { act } }, text);
   const pad = el('div', { class: 'keypad', hidden: true },
@@ -738,14 +740,19 @@ const keypad = (() => {
     e.preventDefault();
     const act = e.target.closest('.key')?.dataset.act;
     if (!act || !target) return;
+    // 入力欄が消えた・隠れた (絞り込みなど) ときは閉じる
+    if (!target.isConnected || target.closest('.card')?.hidden) { hide(); return; }
+    // フォーカスが外れていたら戻す (キーの入力自体はフォーカスがなくても反映される)
+    if (document.activeElement !== target) target.focus({ preventScroll: true });
     if (actions[act]) actions[act]();
     else insert(act);
   });
   document.body.append(pad);
 
   const show = (input) => {
-    clearTimeout(hideTimer);
+    target?.classList.remove('keypad-target');
     target = input;
+    input.classList.add('keypad-target');
     const card = input.closest('.card')?._card;
     label.replaceChildren(
       el('div', { class: 'keypad-title' }, card?.label ?? '', card?.unit ? el('span', { class: 'code' }, `[${card.unit}]`) : null),
@@ -764,17 +771,17 @@ const keypad = (() => {
       if (r.bottom > limit) window.scrollBy({ top: r.bottom - limit, behavior: 'smooth' });
     }, 450);
   };
-  const hide = () => {
+  function hide() {
+    target?.classList.remove('keypad-target');
     target = null;
     pad.hidden = true;
     document.documentElement.classList.remove('keypad-open');
-  };
-  document.addEventListener('focusin', (e) => { if (e.target.matches?.('input[data-keypad]')) show(e.target); });
-  // 次の数値欄へ移るときは閉じずにそのまま使う
-  document.addEventListener('focusout', () => {
-    clearTimeout(hideTimer);
-    hideTimer = setTimeout(() => { if (!document.activeElement?.matches?.('input[data-keypad]')) hide(); }, 50);
+  }
+  document.addEventListener('focusin', (e) => {
+    if (e.target.matches?.('input[data-keypad]')) show(e.target);
+    else if (target && !pad.contains(e.target)) hide(); // 担当・日付などの入力欄へ移った
   });
+  document.addEventListener('click', (e) => { if (target && e.target.closest?.('.choice')) hide(); });
   // 回転などで高さが変わったら、入力中の項目を見える位置に戻す
   window.addEventListener('resize', () => {
     if (pad.hidden) return;

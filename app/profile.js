@@ -170,6 +170,21 @@ export function buildProfileCards(sheet, profile, targetCol) {
     return card;
   };
 
+  // 入力方法の指定 (自動判定より優先)。options があれば選択式。"A|B" の文字列でも配列でもよい
+  for (const ref of profile.rowTypes || []) {
+    const c = resolve(ref, '入力方法の指定');
+    if (!c) continue;
+    const options = Array.isArray(ref.options) ? ref.options
+      : typeof ref.options === 'string' ? ref.options.split('|').map((o) => o.trim()).filter(Boolean) : null;
+    if (options?.length) { c.options = options; c.type = 'choice'; }
+    else if (['number', 'text', 'choice'].includes(ref.type)) c.type = ref.type;
+    else warnings.push(`入力方法の指定: キー ${ref.no} の type / options が正しくありません`);
+    if (c.type === 'choice' && !c.options?.length) {
+      warnings.push(`入力方法の指定: キー ${ref.no} は選択式ですが選択肢 (options) がありません`);
+      c.type = 'text';
+    }
+  }
+
   // 一覧表示 (項目名と入力欄を 1 行にして縦に並べる) にする行
   for (const ref of profile.compactRows || []) {
     const c = resolve(ref, '一覧表示の行');

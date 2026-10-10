@@ -129,8 +129,10 @@ export function buildProfileCards(sheet, profile, targetCol) {
     }
     // 単位がある行・数値の設定値や範囲がある行は数値入力 (iPad で数字キーボードを出す)
     const unit = text(at(r, 'unit'));
-    const type = options ? 'choice'
-      : (unit || num(setText) !== null || min !== null || max !== null || num(b.prev) !== null) ? 'number' : 'text';
+    // 手がかりがない行は設定の defaultType に従う (前回値が文字の行は文字入力のまま)
+    const numeric = unit || num(setText) !== null || min !== null || max !== null || num(b.prev) !== null;
+    const fallback = profile.defaultType === 'number' && !(b.prev && num(b.prev) === null) ? 'number' : 'text';
+    const type = options ? 'choice' : numeric ? 'number' : fallback;
 
     return {
       ...b,

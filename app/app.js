@@ -67,10 +67,6 @@ async function showHome() {
     accept: '.xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12',
     class: 'hidden', onchange: (e) => e.target.files[0] && openFile(e.target.files[0]),
   });
-  const profileInput = el('input', {
-    type: 'file', accept: '.json,application/json', class: 'hidden',
-    onchange: (e) => e.target.files[0] && importProfile(e.target.files[0]),
-  });
   mount(
     el('section', { class: 'home' },
       el('button', { class: 'btn primary big', onclick: () => fileInput.click() }, '📂 点検表 (Excel) を開く'),
@@ -113,23 +109,32 @@ async function showHome() {
               showHome();
             },
           }, '削除')))),
-      el('button', { class: 'btn', onclick: () => profileInput.click() }, '⚙ 設定ファイルを読み込む'),
-      profileInput,
+      profileImportButton(() => showHome()),
     ),
   );
 }
 
-async function importProfile(file) {
+/** 設定ファイルを取り込む。then: 取り込み後の画面 (省略時はホーム) */
+async function importProfile(file, then = showHome) {
   try {
     const p = parseProfile(await file.text());
     await putProfile(p);
     requestPersist();
     toast(`設定「${p.name}」を読み込みました`, 'ok');
-    showHome();
+    await then(p);
   } catch (e) {
     console.error(e);
     toast(`設定ファイルを読み込めませんでした: ${e.message}`, 'error');
   }
+}
+
+/** 「設定ファイルを読み込む」ボタン (ファイル選択つき) */
+function profileImportButton(then, label = '⚙ 設定ファイルを読み込む') {
+  const input = el('input', {
+    type: 'file', accept: '.json,application/json', class: 'hidden',
+    onchange: (e) => e.target.files[0] && importProfile(e.target.files[0], then),
+  });
+  return [el('button', { class: 'btn', onclick: () => input.click() }, label), input];
 }
 
 async function openFile(file) {
@@ -167,6 +172,7 @@ async function showSetup({ fileName, bytes, wb, profiles }) {
     } catch (e) {
       current = null;
       info.replaceChildren(el('p', { class: 'error' }, e.message));
+      if (!profile) info.append(el('p', { class: 'hint' }, 'この点検表用の設定ファイルを読み込むと開けるようになります。'));
       colSel.replaceChildren();
       startBtn.disabled = true;
       return;
@@ -223,9 +229,19 @@ async function showSetup({ fileName, bytes, wb, profiles }) {
     showCards();
   });
 
+  // 設定を取り込んだら、同じ点検表で設定を選び直して開き直す
+  const reopenWithProfile = async (p) => {
+    const all = (await listProfiles()).filter((x) => profileMatches(x, wb, fileName));
+    if (!all.some((x) => x.name === p.name)) toast(`設定「${p.name}」はこの点検表には合いません`, 'error');
+    showSetup({ fileName, bytes, wb, profiles: all });
+  };
+
   mount(
     el('section', { class: 'setup' },
-      profiles.length ? el('label', { class: 'lbl' }, '設定', profileSel) : null,
+      profiles.length ? el('label', { class: 'lbl' }, '設定', profileSel) : el('div', { class: 'warn-box' },
+        el('p', { class: 'warn' }, 'この点検表用の設定ファイルが、この端末にはまだ読み込まれていません。'),
+        el('p', {}, '点検表と同じフォルダにある設定ファイル (.json) を読み込んでください。'),
+        profileImportButton(reopenWithProfile)),
       sheetLbl,
       el('label', { class: 'lbl' }, '書き込む列', colSel),
       info,

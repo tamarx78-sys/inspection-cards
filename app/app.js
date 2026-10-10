@@ -515,11 +515,12 @@ function applyFilterLater() {
   }, 400);
 }
 
-function focusNext(card, { scroll = true } = {}) {
+function focusNext(card, { scroll = true, back = false } = {}) {
   const nodes = [...main.querySelectorAll('.card[data-row]')].filter((n) => !n.hidden);
   const i = nodes.findIndex((n) => n._card === card);
-  const next = nodes.slice(i + 1).find((n) => !n._card.locked);
+  const next = (back ? nodes.slice(0, i).reverse() : nodes.slice(i + 1)).find((n) => !n._card.locked);
   if (!next) {
+    if (back) { toast('最初の項目です'); return; }
     document.activeElement?.blur?.();
     toast('最後の項目です');
     return;
@@ -714,7 +715,8 @@ const keypad = (() => {
   };
   const insert = (s) => edit((v, a, b) => [v.slice(0, a) + s + v.slice(b), a + s.length]);
   const actions = {
-    back: () => edit((v, a, b) => (a !== b ? [v.slice(0, a) + v.slice(b), a] : [v.slice(0, Math.max(0, a - 1)) + v.slice(a), Math.max(0, a - 1)])),
+    // 前の項目へ (入力済みの値は全選択されるので、打ち直せば置き換わる)
+    prev: () => { const card = target.closest('.card')?._card; if (card) focusNext(card, { back: true }); },
     // Enter と同じ (空欄なら前回値で確定して次へ)
     next: () => target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })),
     close: () => target.blur(),
@@ -724,7 +726,7 @@ const keypad = (() => {
     el('div', { class: 'keypad-side' }, label, key('閉じる', 'close', 'close')),
     el('div', { class: 'keypad-keys' },
       key('7', '7'), key('8', '8'), key('9', '9'), key('-', '-'),
-      key('4', '4'), key('5', '5'), key('6', '6'), key('戻る', 'back', 'fn'),
+      key('4', '4'), key('5', '5'), key('6', '6'), key('戻る', 'prev', 'fn'),
       key('1', '1'), key('2', '2'), key('3', '3'), key('Enter', 'next', 'next'),
       key('0', '0', 'zero'), key('.', '.')));
   // pointerdown で処理し既定動作を止める (入力欄からフォーカスを外さないため)
@@ -745,6 +747,8 @@ const keypad = (() => {
       el('div', { class: 'keypad-title' }, card?.label ?? '', card?.unit ? el('span', { class: 'code' }, `[${card.unit}]`) : null),
       card?.prev ? el('div', { class: 'keypad-prev' }, `前回 ${card.prev}`) : null);
     pad.hidden = false;
+    // 全選択しておき、入力済みの欄でも打てばそのまま置き換わるようにする (削除キーがないため)
+    input.select();
     document.documentElement.classList.add('keypad-open');
     document.documentElement.style.setProperty('--keypad-h', `${pad.offsetHeight}px`);
     // カードへのスクロールが終わってもテンキーに隠れていれば、見える位置までずらす

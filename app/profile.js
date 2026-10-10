@@ -166,6 +166,12 @@ export function buildProfileCards(sheet, profile, targetCol) {
     return card;
   };
 
+  // 一覧表示 (項目名と入力欄を 1 行にして縦に並べる) にする行
+  for (const ref of profile.compactRows || []) {
+    const c = resolve(ref, '一覧表示の行');
+    if (c) c.compact = true;
+  }
+
   // 対象外の行
   const excluded = new Set();
   for (const ref of profile.exclude || []) {

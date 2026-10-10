@@ -407,7 +407,9 @@ function cardChips(card) {
 
 function renderCard(card) {
   const status = el('div', { class: 'status' });
-  const node = el('div', { class: `card ${card.type === 'choice' ? 'is-choice' : ''}`, dataset: { row: card.row } });
+  const node = el('div', {
+    class: `card ${card.type === 'choice' ? 'is-choice' : ''} ${card.compact ? 'compact' : ''}`, dataset: { row: card.row },
+  });
   node._card = card;
   const prevBadge = el('span', { class: 'badge prev-badge' }, '前回値');
   const autoBadge = el('span', { class: 'badge prev-badge' }, '自動');
@@ -535,15 +537,15 @@ function showCards() {
   // 項目と条件カードを並べ、工程 (区分) ごとにまとめる
   const selectConds = cards.conditions.filter((c) => c.kind === 'select');
   const groups = [];
-  const push = (name, node, own = false) => {
+  const push = (name, node, own = false, compact = false) => {
     const last = groups[groups.length - 1];
-    if (!own && last && !last.own && last.name === name) last.nodes.push(node);
-    else groups.push({ name, nodes: [node], own });
+    if (!own && last && !last.own && last.name === name && last.compact === compact) last.nodes.push(node);
+    else groups.push({ name, nodes: [node], own, compact });
   };
   for (const cd of selectConds.filter((c) => !c.placeBefore)) push(cd.label, renderConditionCard(cd), true);
   for (const c of cards.items) {
     for (const cd of selectConds.filter((x) => x.placeBefore === c.row)) push(cd.label, renderConditionCard(cd), true);
-    push(c.section, renderCard(c));
+    push(c.section, renderCard(c), false, !!c.compact);
   }
 
   mount(
@@ -564,7 +566,7 @@ function showCards() {
       el('div', { class: 'cards' }, cards.meta.map(renderCard))),
     groups.map((g) => el('div', { class: 'section' },
       el('h2', { class: 'section-title' }, g.name || '項目'),
-      el('div', { class: 'cards' }, g.nodes))),
+      el('div', { class: g.compact ? 'compact-list' : 'cards' }, g.nodes))),
     el('div', { class: 'bottom-space' }),
   );
   updateProgress();

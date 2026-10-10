@@ -154,6 +154,27 @@ main { max-width: 1400px; margin: 0 auto; padding: 16px 16px calc(env(safe-area-
 .warn-box { margin-top: 12px; background: var(--warn-bg); border-radius: var(--radius); padding: 8px 14px; font-size: 0.875rem; }
 .warn-box ul { margin: 4px 0; padding-left: 20px; }
 
+/* 一覧表示: 項目名 | 入力欄 を 1 行にして縦に並べる (紙の点検表と横に置いて見比べやすく) */
+.compact-list {
+  display: grid; max-width: 48rem;
+  background: var(--surface); border: 1.5px solid var(--line); border-radius: var(--radius); overflow: hidden;
+}
+.card.compact {
+  grid-template-columns: minmax(0, 1fr) minmax(6.5rem, 9rem); align-items: center;
+  gap: 2px 12px; padding: 6px 12px; border: 0; border-radius: 0; border-bottom: 1px solid var(--line);
+}
+.card.compact:last-child { border-bottom: 0; }
+.card.compact > .card-head, .card.compact > .chips { grid-column: 1; }
+.card.compact > .field, .card.compact > .choices, .card.compact > .locked-value { grid-column: 2; grid-row: 1 / span 2; }
+.card.compact > .status { grid-column: 1 / -1; }
+.card.compact .card-title { font-size: 1rem; }
+.card.compact .chips { gap: 4px; }
+.card.compact .chip { font-size: 0.75rem; padding: 0 8px; }
+.card.compact .field.big { font-size: 1.25rem; min-height: 2.75rem; padding: 4px 10px; }
+.card.compact .choice { min-height: 2.75rem; font-size: 1rem; }
+.card.compact[data-state="ok"] { border-color: var(--line); }
+.card.compact[data-state="ng"] { background: var(--ng-bg); }
+
 .status { font-size:0.8125rem; font-weight: 700; min-height: 0; }
 .status:empty { display: none; }
 .card[data-state="ng"] .status { color: var(--ng); }

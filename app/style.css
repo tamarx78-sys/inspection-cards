@@ -211,7 +211,34 @@ main { max-width: 1400px; margin: 0 auto; padding: 16px 16px calc(env(safe-area-
 .toast.error { background: #c62828ee; }
 .toast.ok { background: #1a7f37ee; }
 
+/* テンキー: 数値入力欄にフォーカスしている間だけ画面下に出す */
+.keypad {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+  display: flex; justify-content: flex-end; gap: 16px;
+  padding: 10px 16px calc(env(safe-area-inset-bottom) + 10px);
+  background: var(--surface); border-top: 1px solid var(--line); box-shadow: 0 -4px 16px rgb(0 0 0 / .08);
+  user-select: none; -webkit-user-select: none; touch-action: manipulation;
+}
+.keypad-side { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: space-between; gap: 8px; }
+.keypad-title { font-weight: 700; font-size: 1.0625rem; overflow: hidden; text-overflow: ellipsis; }
+.keypad-prev { color: var(--muted); font-size: 0.875rem; font-variant-numeric: tabular-nums; }
+.keypad-keys { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; width: min(100%, 22rem); flex-shrink: 0; }
+.key {
+  appearance: none; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--text);
+  font: inherit; font-size: 1.5rem; font-weight: 600; min-height: 3.25rem; padding: 0; cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+.key.fn { font-size: 1rem; background: var(--chip); }
+.key.next { grid-column: span 2; font-size: 1.125rem; background: var(--primary); border-color: var(--primary); color: var(--primary-text); }
+.key.close { align-self: flex-start; font-size: 1rem; min-height: 2.75rem; padding: 0 18px; background: transparent; }
+.key:active { filter: brightness(.9); transform: scale(.97); }
+html.keypad-open { scroll-padding-bottom: var(--keypad-h, 0px); }
+html.keypad-open main { padding-bottom: calc(var(--keypad-h, 0px) + 16px); }
+
 @media (max-width: 600px) {
+  .keypad { flex-direction: column; gap: 8px; }
+  .keypad-side { max-width: none; flex-direction: row; align-items: center; }
+  .keypad-keys { width: 100%; }
   .cards { grid-template-columns: 1fr; }
   .seg { padding: 6px 10px; }
 }

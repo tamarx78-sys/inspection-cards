@@ -26,7 +26,7 @@ const add = (parent, children) => {
   for (const c of [children].flat(Infinity)) if (c !== null && c !== undefined && c !== false) parent.append(c);
   return parent;
 };
-const mount = (...children) => { main.replaceChildren(); add(main, children); };
+const mount = (...children) => { keypad.hide(); main.replaceChildren(); add(main, children); };
 const pad = (n) => String(n).padStart(2, '0');
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 const nowTime = () => { const d = new Date(); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
@@ -404,7 +404,8 @@ function renderInput(card, refresh) {
   // 管理値はチップに出しているので、入力欄には重ねて出さない
   const placeholder = card.type === 'number' && !card.rangeText && !card.setText ? '数値' : '';
   if (card.type === 'number') {
-    return el('input', { ...common, type: 'text', inputmode: 'decimal', autocomplete: 'off', placeholder });
+    // 画面キーボードは出さず、アプリのテンキーで入力する (外付けキーボードはそのまま使える)
+    return el('input', { ...common, type: 'text', inputmode: 'none', autocomplete: 'off', placeholder, dataset: { keypad: '' } });
   }
   return el('input', { ...common, type: 'text', autocomplete: 'off', placeholder, list: card.type === 'name' ? 'names' : undefined });
 }
@@ -693,6 +694,89 @@ async function showExport() {
   const close = () => dlg.remove();
   document.body.append(dlg);
 }
+
+// ---------------- テンキー ----------------
+// iPad の Safari は inputmode="decimal" でもテンキーにならない (通常のキーボードの数字段が出るだけ) ため、
+// 数値入力欄 (data-keypad) にフォーカスしている間は画面下にアプリのテンキーを出す。
+const keypad = (() => {
+  let target = null;
+  let hideTimer;
+  let fixTimer;
+  const label = el('div', { class: 'keypad-label' });
+  const edit = (fn) => {
+    const v = target.value;
+    const a = target.selectionStart ?? v.length;
+    const b = target.selectionEnd ?? a;
+    const [next, pos] = fn(v, a, b);
+    target.value = next;
+    target.setSelectionRange(pos, pos);
+    target.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  const insert = (s) => edit((v, a, b) => [v.slice(0, a) + s + v.slice(b), a + s.length]);
+  const actions = {
+    back: () => edit((v, a, b) => (a !== b ? [v.slice(0, a) + v.slice(b), a] : [v.slice(0, Math.max(0, a - 1)) + v.slice(a), Math.max(0, a - 1)])),
+    clear: () => edit(() => ['', 0]),
+    sign: () => edit((v, a) => (v.startsWith('-') ? [v.slice(1), Math.max(0, a - 1)] : [`-${v}`, a + 1])),
+    // Enter と同じ (空欄なら前回値で確定して次へ)
+    next: () => target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })),
+    close: () => target.blur(),
+  };
+  const key = (text, act, cls = '') => el('button', { type: 'button', class: `key ${cls}`, dataset: { act } }, text);
+  const pad = el('div', { class: 'keypad', hidden: true },
+    el('div', { class: 'keypad-side' }, label, key('閉じる', 'close', 'close')),
+    el('div', { class: 'keypad-keys' },
+      key('7', '7'), key('8', '8'), key('9', '9'), key('⌫', 'back', 'fn'),
+      key('4', '4'), key('5', '5'), key('6', '6'), key('クリア', 'clear', 'fn'),
+      key('1', '1'), key('2', '2'), key('3', '3'), key('±', 'sign', 'fn'),
+      key('0', '0'), key('.', '.'), key('次へ', 'next', 'next')));
+  // pointerdown で処理し既定動作を止める (入力欄からフォーカスを外さないため)
+  pad.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    const act = e.target.closest('.key')?.dataset.act;
+    if (!act || !target) return;
+    if (actions[act]) actions[act]();
+    else insert(act);
+  });
+  document.body.append(pad);
+
+  const show = (input) => {
+    clearTimeout(hideTimer);
+    target = input;
+    const card = input.closest('.card')?._card;
+    label.replaceChildren(
+      el('div', { class: 'keypad-title' }, card?.label ?? '', card?.unit ? el('span', { class: 'code' }, `[${card.unit}]`) : null),
+      card?.prev ? el('div', { class: 'keypad-prev' }, `前回 ${card.prev}`) : null);
+    pad.hidden = false;
+    document.documentElement.classList.add('keypad-open');
+    document.documentElement.style.setProperty('--keypad-h', `${pad.offsetHeight}px`);
+    // カードへのスクロールが終わってもテンキーに隠れていれば、見える位置までずらす
+    clearTimeout(fixTimer);
+    fixTimer = setTimeout(() => {
+      if (target !== input) return;
+      const limit = window.innerHeight - pad.offsetHeight - 12;
+      const r = (input.closest('.card') || input).getBoundingClientRect();
+      if (r.bottom > limit) window.scrollBy({ top: r.bottom - limit, behavior: 'smooth' });
+    }, 450);
+  };
+  const hide = () => {
+    target = null;
+    pad.hidden = true;
+    document.documentElement.classList.remove('keypad-open');
+  };
+  document.addEventListener('focusin', (e) => { if (e.target.matches?.('input[data-keypad]')) show(e.target); });
+  // 次の数値欄へ移るときは閉じずにそのまま使う
+  document.addEventListener('focusout', () => {
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => { if (!document.activeElement?.matches?.('input[data-keypad]')) hide(); }, 50);
+  });
+  // 回転などで高さが変わったら、入力中の項目を見える位置に戻す
+  window.addEventListener('resize', () => {
+    if (pad.hidden) return;
+    document.documentElement.style.setProperty('--keypad-h', `${pad.offsetHeight}px`);
+    target?.closest('.card')?.scrollIntoView({ block: 'center' });
+  });
+  return { hide };
+})();
 
 // ---------------- 文字サイズ・画面の向き ----------------
 const SIZES = [['', '標準'], ['l', '大'], ['xl', '特大']];

@@ -229,7 +229,8 @@ main { max-width: 1400px; margin: 0 auto; padding: 16px 16px calc(env(safe-area-
   font-variant-numeric: tabular-nums;
 }
 .key.fn { font-size: 1rem; background: var(--chip); }
-.key.next { grid-column: span 2; font-size: 1.125rem; background: var(--primary); border-color: var(--primary); color: var(--primary-text); }
+.key.zero { grid-column: span 2; }
+.key.next { grid-row: span 2; font-size: 1.125rem; background: var(--primary); border-color: var(--primary); color: var(--primary-text); }
 .key.close { align-self: flex-start; font-size: 1rem; min-height: 2.75rem; padding: 0 18px; background: transparent; }
 .key:active { filter: brightness(.9); transform: scale(.97); }
 html.keypad-open { scroll-padding-bottom: var(--keypad-h, 0px); }

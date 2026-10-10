@@ -715,8 +715,6 @@ const keypad = (() => {
   const insert = (s) => edit((v, a, b) => [v.slice(0, a) + s + v.slice(b), a + s.length]);
   const actions = {
     back: () => edit((v, a, b) => (a !== b ? [v.slice(0, a) + v.slice(b), a] : [v.slice(0, Math.max(0, a - 1)) + v.slice(a), Math.max(0, a - 1)])),
-    clear: () => edit(() => ['', 0]),
-    sign: () => edit((v, a) => (v.startsWith('-') ? [v.slice(1), Math.max(0, a - 1)] : [`-${v}`, a + 1])),
     // Enter と同じ (空欄なら前回値で確定して次へ)
     next: () => target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })),
     close: () => target.blur(),
@@ -725,10 +723,10 @@ const keypad = (() => {
   const pad = el('div', { class: 'keypad', hidden: true },
     el('div', { class: 'keypad-side' }, label, key('閉じる', 'close', 'close')),
     el('div', { class: 'keypad-keys' },
-      key('7', '7'), key('8', '8'), key('9', '9'), key('⌫', 'back', 'fn'),
-      key('4', '4'), key('5', '5'), key('6', '6'), key('クリア', 'clear', 'fn'),
-      key('1', '1'), key('2', '2'), key('3', '3'), key('±', 'sign', 'fn'),
-      key('0', '0'), key('.', '.'), key('次へ', 'next', 'next')));
+      key('7', '7'), key('8', '8'), key('9', '9'), key('-', '-'),
+      key('4', '4'), key('5', '5'), key('6', '6'), key('戻る', 'back', 'fn'),
+      key('1', '1'), key('2', '2'), key('3', '3'), key('Enter', 'next', 'next'),
+      key('0', '0', 'zero'), key('.', '.')));
   // pointerdown で処理し既定動作を止める (入力欄からフォーカスを外さないため)
   pad.addEventListener('pointerdown', (e) => {
     e.preventDefault();

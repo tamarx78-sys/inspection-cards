@@ -1,6 +1,6 @@
 // オフライン用: アプリ本体をキャッシュし、キャッシュ優先で返す。
 // アプリを更新したら VERSION を上げること。
-const VERSION = 'v15';
+const VERSION = 'v16';
 const CACHE = `inspection-cards-${VERSION}`;
 const FILES = [
   './', './index.html', './style.css', './app.js', './xlsx.js', './zip.js', './store.js', './profile.js',

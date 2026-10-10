@@ -715,19 +715,23 @@ const keypad = (() => {
   };
   const insert = (s) => edit((v, a, b) => [v.slice(0, a) + s + v.slice(b), a + s.length]);
   const actions = {
-    // 前の項目へ (入力済みの値は全選択されるので、打ち直せば置き換わる)
-    prev: () => { const card = target.closest('.card')?._card; if (card) focusNext(card, { back: true }); },
+    back: () => edit((v, a, b) => (a !== b ? [v.slice(0, a) + v.slice(b), a] : [v.slice(0, Math.max(0, a - 1)) + v.slice(a), Math.max(0, a - 1)])),
     // Enter と同じ (空欄なら前回値で確定して次へ)
-    next: () => target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })),
+    enter: () => target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })),
+    // 戻る / 進む: 値には触れずに前後の項目へ移るだけ
+    prev: () => { const card = target.closest('.card')?._card; if (card) focusNext(card, { back: true }); },
+    next: () => { const card = target.closest('.card')?._card; if (card) focusNext(card); },
     close: () => target.blur(),
   };
   const key = (text, act, cls = '') => el('button', { type: 'button', class: `key ${cls}`, dataset: { act } }, text);
   const pad = el('div', { class: 'keypad', hidden: true },
-    el('div', { class: 'keypad-side' }, label, key('閉じる', 'close', 'close')),
+    el('div', { class: 'keypad-side' }, label,
+      el('div', { class: 'keypad-nav' }, key('▲ 戻る', 'prev', 'nav'), key('▼ 進む', 'next', 'nav')),
+      key('閉じる', 'close', 'close')),
     el('div', { class: 'keypad-keys' },
       key('7', '7'), key('8', '8'), key('9', '9'), key('-', '-'),
-      key('4', '4'), key('5', '5'), key('6', '6'), key('戻る', 'prev', 'fn'),
-      key('1', '1'), key('2', '2'), key('3', '3'), key('Enter', 'next', 'next'),
+      key('4', '4'), key('5', '5'), key('6', '6'), key('BS', 'back', 'fn'),
+      key('1', '1'), key('2', '2'), key('3', '3'), key('Enter', 'enter', 'next'),
       key('0', '0', 'zero'), key('.', '.')));
   // pointerdown で処理し既定動作を止める (入力欄からフォーカスを外さないため)
   pad.addEventListener('pointerdown', (e) => {

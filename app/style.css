@@ -217,7 +217,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 16px 16px calc(env(safe-area-
   display: flex; justify-content: flex-end; gap: 16px;
   padding: 10px 16px calc(env(safe-area-inset-bottom) + 10px);
   background: var(--surface); border-top: 1px solid var(--line); box-shadow: 0 -4px 16px rgb(0 0 0 / .08);
-  user-select: none; -webkit-user-select: none; touch-action: manipulation;
+  user-select: none; -webkit-user-select: none; touch-action: none; /* テンキー上の指の動きでページをスクロールさせない */
 }
 .keypad-side { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: space-between; gap: 8px; }
 .keypad-title { font-weight: 700; font-size: 1.0625rem; overflow: hidden; text-overflow: ellipsis; }
@@ -229,6 +229,8 @@ main { max-width: 1400px; margin: 0 auto; padding: 16px 16px calc(env(safe-area-
   font-variant-numeric: tabular-nums;
 }
 .key.fn { font-size: 1rem; background: var(--chip); }
+.field.keypad-fresh:not(:placeholder-shown) { background: color-mix(in srgb, var(--primary) 14%, var(--surface)); }
+.field[data-keypad] { cursor: pointer; caret-color: transparent; }
 .key.zero { grid-column: span 2; }
 .key.next { grid-row: span 2; font-size: 1.125rem; background: var(--primary); border-color: var(--primary); color: var(--primary-text); }
 .keypad-nav { display: flex; gap: 8px; }

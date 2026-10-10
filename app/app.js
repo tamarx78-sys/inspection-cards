@@ -779,6 +779,7 @@ const keypad = (() => {
     target?.classList.remove('keypad-target', 'keypad-fresh');
     target = input;
     fresh = true;
+    shownCount++;
     input.classList.add('keypad-target', 'keypad-fresh');
     const card = input.closest('.card')?._card;
     label.replaceChildren(
@@ -797,12 +798,16 @@ const keypad = (() => {
   }
   // 数値欄のタップ: フォーカスさせずにテンキーの対象にする (スクロールの指の動きでは反応しないよう click で)
   document.addEventListener('pointerdown', (e) => { if (e.target.matches?.('input[data-keypad]')) e.preventDefault(); });
+  let shownCount = 0; // show() の回数。click の間に入力中の欄が変わったかを見る
+  let shownAtClick = 0;
   document.addEventListener('click', (e) => {
+    shownAtClick = shownCount;
     if (Date.now() < swallowUntil) { swallowUntil = 0; e.preventDefault(); e.stopPropagation(); }
   }, true);
   document.addEventListener('click', (e) => {
     if (e.target.matches?.('input[data-keypad]')) { activateInput(e.target); reveal(); }
-    else if (target && e.target.closest?.('.choice')) hide();
+    // 選択式を押したら閉じる。ただし選んだ結果、次の数値欄へ移ったときは閉じない
+    else if (target && e.target.closest?.('.choice') && shownCount === shownAtClick) hide();
   });
   // Tab キーなどでフォーカスが来たとき・ほかの入力欄へ移ったとき
   document.addEventListener('focusin', (e) => {

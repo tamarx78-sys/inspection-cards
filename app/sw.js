@@ -1,6 +1,6 @@
 // オフライン用: アプリ本体をキャッシュし、キャッシュ優先で返す。
 // アプリを更新したら VERSION を上げること。
-const VERSION = 'v20';
+const VERSION = 'v21';
 const CACHE = `inspection-cards-${VERSION}`;
 const FILES = [
   './', './index.html', './style.css', './app.js', './xlsx.js', './zip.js', './store.js', './profile.js',
@@ -8,7 +8,14 @@ const FILES = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)).then(() => self.skipWaiting()));
+  // HTTP キャッシュに残った古いファイルを拾わないよう、サーバーから取り直す
+  const reqs = FILES.map((f) => new Request(f, { cache: 'reload' }));
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(reqs)).then(() => self.skipWaiting()));
+});
+
+// 画面からの問い合わせに版を返す (ホームの「アプリの版」表示・更新の案内に使う)
+self.addEventListener('message', (e) => {
+  if (e.data === 'version') e.ports[0]?.postMessage({ version: VERSION });
 });
 
 self.addEventListener('activate', (e) => {

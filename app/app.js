@@ -7,6 +7,7 @@ import {
 import {
   putSession, getSession, deleteSession, listSessions, requestPersist, putProfile, deleteProfile, listProfiles,
 } from './store.js';
+import { evaluate } from './formula.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const main = $('#main');
@@ -293,8 +294,10 @@ function judge(card, raw) {
     }
     return { state: 'ok' };
   }
-  if (card.type === 'number') {
+  if (card.type === 'number' || card.type === 'formula') {
     const v = toCellValue('number', s);
+    // 自動計算は表示と同じ桁 (桁数の列) に丸めてから判定する
+    if (card.type === 'formula' && v.kind === 'n' && Number.isInteger(card.digits)) v.v = +v.v.toFixed(card.digits);
     if (v.kind !== 'n') return { state: 'warn', msg: '数値ではありません (文字として書き込みます)' };
     const { range } = card;
     if (range && ((range.min !== undefined && v.v < range.min) || (range.max !== undefined && v.v > range.max))) {
@@ -302,7 +305,7 @@ function judge(card, raw) {
       return { state: 'ng', msg: `${S.cards.ngMessage}${card.effect ? ` / 影響: ${card.effect}` : ''}` };
     }
     const decimals = (s.normalize('NFKC').split('.')[1] || '').length;
-    if (card.digits !== null && card.digits !== undefined && decimals > card.digits) {
+    if (card.type !== 'formula' && card.digits !== null && card.digits !== undefined && decimals > card.digits) {
       return { state: 'warn', msg: `小数点以下は ${card.digits} 桁です` };
     }
   }
@@ -334,8 +337,29 @@ function targetCards() {
   return [...S.cards.meta, ...S.cards.items].filter((c) => !c.locked && applicable(c));
 }
 /** 入力が必要なカード (任意入力を除く)。進み具合と未入力の数え方に使う */
-const requiredCards = () => targetCards().filter((c) => !c.optional);
-const isEmptyRequired = (c) => !c.optional && judge(c, S.session.values[c.row]).state === 'empty';
+const requiredCards = () => targetCards().filter((c) => !c.optional && c.type !== 'formula');
+const isEmptyRequired = (c) => !c.optional && c.type !== 'formula' && judge(c, S.session.values[c.row]).state === 'empty';
+
+/** 自動計算の行を、今の入力値から計算し直す (計算できなければ空) */
+function recalcFormulas() {
+  const { cards, sheet, session } = S;
+  const fcards = cards.items.filter((c) => c.type === 'formula');
+  if (!fcards.length) return;
+  const get = (r, c) => {
+    if (c === cards.targetCol) {
+      const v = toCellValue('number', session.values[r]);
+      if (v) return v.kind === 'n' ? v.v : null;
+    }
+    const cell = sheet.get(r, c);
+    return cell && typeof cell.value === 'number' ? cell.value : null;
+  };
+  for (const card of fcards) {
+    let v = null;
+    try { v = evaluate(card.formula, get); } catch (e) { console.warn('式を計算できません', card.formula, e); }
+    session.values[card.row] = v === null ? '' : String(+v.toPrecision(12));
+  }
+  for (const n of main.querySelectorAll('.card.is-formula')) n._refresh?.();
+}
 
 function updateProgress() {
   const list = requiredCards();
@@ -369,6 +393,7 @@ function setValue(card, value, { fromPrev = false } = {}) {
   else delete session.fromPrev[card.row];
   delete session.auto[card.row];
   if (card.type === 'name') localStorage.setItem('lastName', value);
+  recalcFormulas();
   scheduleSave();
   if (card.conditionSource) applyFilter(); // 条件の元になる項目が変わると、対象の行が変わる
   updateProgress();
@@ -399,6 +424,17 @@ function renderInput(card, refresh) {
     group._paint = paint;
     return group;
   }
+  if (card.type === 'formula') {
+    // 自動計算: 入力欄の代わりに計算結果を表示する
+    const out = el('div', { class: 'formula-value' });
+    out._paint = () => {
+      const v = String(S.session.values[card.row] ?? '');
+      const shown = v && card.digits !== null && card.digits !== undefined ? (+v).toFixed(card.digits) : v;
+      out.replaceChildren(el('span', {}, shown || '—'), el('span', { class: 'badge' }, '自動計算'));
+    };
+    out._paint();
+    return out;
+  }
   const onInput = (e) => { setValue(card, e.target.value); refresh(); };
   const common = { class: 'field big', value, enterkeyhint: 'next', oninput: onInput, onchange: onInput };
   if (card.type === 'date') return el('input', { ...common, type: 'date' });
@@ -415,6 +451,12 @@ function renderInput(card, refresh) {
 
 const canUsePrev = (card) => card.kind === 'item' && !card.locked && card.prev !== '' && card.type !== 'choice';
 
+/** 前回値の表示 (桁数の列がある数値は、その桁に揃える。書き込む値はそのまま) */
+const prevText = (card) => {
+  const v = toCellValue('number', card.prev);
+  return v?.kind === 'n' && Number.isInteger(card.digits) && card.type !== 'choice' ? v.v.toFixed(card.digits) : card.prev;
+};
+
 function cardChips(card) {
   if (card.kind !== 'item') return null;
   const chips = card.chips.map((c) => el('span', { class: 'chip where' }, c));
@@ -425,14 +467,26 @@ function cardChips(card) {
   if (!card.rangeKind && card.kindText && card.type !== 'choice' && !/[～~]/.test(card.kindText)) {
     chips.push(el('span', { class: 'chip' }, card.kindText));
   }
-  if (card.prev) chips.push(el('span', { class: 'chip prev' }, `前回 ${card.prev}`));
+  if (card.prev) chips.push(el('span', { class: 'chip prev' }, `前回 ${prevText(card)}`));
   return el('div', { class: 'chips' }, chips);
+}
+
+/** 備考 (備考の列・セルのコメント) と、前回の記録に付いたコメント */
+function cardNotes(card) {
+  const notes = [card.note, ...(card.comments || [])].filter(Boolean);
+  const uniq = [...new Set(notes)];
+  const memo = card.lastMemo;
+  if (!uniq.length && !memo) return null;
+  const memoTag = memo && (memo.prev ? '前回メモ' : `メモ${memo.date ? ` (${memo.date})` : ''}`);
+  return el('div', { class: 'notes' },
+    uniq.map((t) => el('div', { class: 'note' }, el('span', { class: 'note-tag' }, '備考'), t)),
+    memo ? el('div', { class: 'note prev' }, el('span', { class: 'note-tag' }, memoTag), memo.text) : null);
 }
 
 function renderCard(card) {
   const status = el('div', { class: 'status' });
   const node = el('div', {
-    class: `card ${card.type === 'choice' ? 'is-choice' : ''} ${card.compact ? 'compact' : ''}`, dataset: { row: card.row },
+    class: `card ${card.type === 'choice' ? 'is-choice' : ''} ${card.type === 'formula' ? 'is-formula' : ''} ${card.compact ? 'compact' : ''}`, dataset: { row: card.row },
   });
   node._card = card;
   const prevBadge = el('span', { class: 'badge prev-badge' }, '前回値');
@@ -477,6 +531,7 @@ function renderCard(card) {
     cardChips(card),
     input,
     status,
+    cardNotes(card),
   ]);
   refresh();
   return node;
@@ -521,7 +576,7 @@ function applyFilterLater() {
 function focusNext(card, { scroll = true, back = false } = {}) {
   const nodes = [...main.querySelectorAll('.card[data-row]')].filter((n) => !n.hidden);
   const i = nodes.findIndex((n) => n._card === card);
-  const next = (back ? nodes.slice(0, i).reverse() : nodes.slice(i + 1)).find((n) => !n._card.locked);
+  const next = (back ? nodes.slice(0, i).reverse() : nodes.slice(i + 1)).find((n) => !n._card.locked && n._card.type !== 'formula');
   if (!next) {
     if (back) { toast('最初の項目です'); return; }
     document.activeElement?.blur?.();
@@ -558,6 +613,7 @@ function jumpToFirstEmpty() {
 
 function showCards() {
   const { session, cards } = S;
+  recalcFormulas();
   setHeader(session.fileName, [
     el('button', { class: 'btn ghost', onclick: () => { flushSave(); showHome(); } }, '一覧'),
     el('button', { class: 'btn primary', onclick: showExport }, '書き出し'),
@@ -785,8 +841,10 @@ const keypad = (() => {
     input.classList.add('keypad-target', 'keypad-fresh');
     const card = input.closest('.card')?._card;
     label.replaceChildren(
-      el('div', { class: 'keypad-title' }, card?.label ?? '', card?.unit ? el('span', { class: 'code' }, `[${card.unit}]`) : null),
-      card?.prev ? el('div', { class: 'keypad-prev' }, `前回 ${card.prev}`) : null);
+      el('div', { class: 'keypad-title' }, card?.label ?? '', card?.split?.key ? ` ${card.split.key}` : '',
+        card?.sub && !card.hideSub ? el('span', { class: 'code' }, card.sub) : null,
+        card?.unit ? el('span', { class: 'code' }, `[${card.unit}]`) : null),
+      card?.prev ? el('div', { class: 'keypad-prev' }, `前回 ${prevText(card)}`) : null);
     pad.hidden = false;
     document.documentElement.classList.add('keypad-open');
     document.documentElement.style.setProperty('--keypad-h', `${pad.offsetHeight}px`);

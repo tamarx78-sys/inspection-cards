@@ -108,6 +108,7 @@ export async function loadSheet(wb, sheet) {
   const text = await wb.zip.readText(sheet.path);
   const doc = parseXml(text);
   const cells = new Map();
+  const sharedF = new Map(); // 共有数式: si -> 元のセルと式
   let maxR = 0, maxC = 0;
   for (const c of all(doc, 'c')) {
     const pos = parseRef(c.getAttribute('r'));
@@ -115,7 +116,8 @@ export async function loadSheet(wb, sheet) {
     const t = c.getAttribute('t') || 'n';
     const s = +(c.getAttribute('s') || 0);
     const vNode = first(c, 'v');
-    const hasF = !!first(c, 'f');
+    const fNode = first(c, 'f');
+    const hasF = !!fNode;
     let value = null;
     if (t === 's' && vNode) value = wb.shared[+vNode.textContent] ?? '';
     else if (t === 'inlineStr') value = first(c, 'is') ? richText(first(c, 'is')) : '';
@@ -124,9 +126,26 @@ export async function loadSheet(wb, sheet) {
     else if (vNode && vNode.textContent !== '') value = +vNode.textContent;
     const fmt = wb.formats[s] || null;
     const empty = (value === null || value === '') && !hasF;
-    cells.set(key(pos.r, pos.c), { ...pos, t, s, value, fmt, hasF, empty });
+    const cell = { ...pos, t, s, value, fmt, hasF, empty };
+    if (fNode) {
+      const ft = fNode.textContent;
+      if (fNode.getAttribute('t') === 'shared') {
+        const si = fNode.getAttribute('si');
+        if (ft) sharedF.set(si, { r: pos.r, c: pos.c, f: ft });
+        cell.sharedSi = si;
+      }
+      if (ft) cell.formula = ft;
+    }
+    cells.set(key(pos.r, pos.c), cell);
     if (!empty) { maxR = Math.max(maxR, pos.r); maxC = Math.max(maxC, pos.c); }
   }
+  // 共有数式の子セルは、元のセルの式を位置の差だけずらして求める
+  for (const cell of cells.values()) {
+    if (cell.formula || !cell.sharedSi) continue;
+    const m = sharedF.get(cell.sharedSi);
+    if (m) cell.formula = shiftFormula(m.f, cell.r - m.r, cell.c - m.c);
+  }
+  const comments = await loadComments(wb, sheet);
   const merges = all(doc, 'mergeCell').map((m) => {
     const [a, b] = m.getAttribute('ref').split(':').map(parseRef);
     return { r1: a.r, c1: a.c, r2: (b || a).r, c2: (b || a).c };
@@ -145,6 +164,8 @@ export async function loadSheet(wb, sheet) {
   const sheetObj = {
     ...sheet, xml: text, cells, merges, maxR, maxC,
     get(r, c) { return cells.get(key(r, c)) || null; },
+    /** セルのコメント (メモ) の本文。なければ '' */
+    comment(r, c) { return comments.get(key(r, c)) || ''; },
     validationOptions(r, c) {
       const v = validations.find((x) => x.ranges.some((m) => r >= m.r1 && r <= m.r2 && c >= m.c1 && c <= m.c2));
       if (!v) return null;
@@ -169,6 +190,46 @@ export async function loadSheet(wb, sheet) {
     },
   };
   return sheetObj;
+}
+
+/** シートに付いたコメント (メモ) を読む。先頭の「作成者名:」の行は除く */
+async function loadComments(wb, sheet) {
+  const out = new Map();
+  const relsPath = sheet.path.replace(/([^/]+)$/, '_rels/$1.rels');
+  const relsText = await wb.zip.readText(relsPath);
+  if (!relsText) return out;
+  const rel = all(parseXml(relsText), 'Relationship').find((r) => /\/comments$/.test(r.getAttribute('Type') || ''));
+  if (!rel) return out;
+  const text = await wb.zip.readText(resolvePath(sheet.path, rel.getAttribute('Target')));
+  if (!text) return out;
+  const authors = all(parseXml(text), 'author').map((a) => a.textContent.trim());
+  for (const cm of all(parseXml(text), 'comment')) {
+    const pos = parseRef(cm.getAttribute('ref'));
+    if (!pos) continue;
+    let body = first(cm, 'text') ? richText(first(cm, 'text')) : '';
+    const author = authors[+cm.getAttribute('authorId')] || '';
+    if (author && body.startsWith(`${author}:`)) body = body.slice(author.length + 1);
+    else body = body.replace(/^[A-Za-z][A-Za-z .'-]*:\s*\n/, ''); // 作成者名の行 (author 一覧と違う場合)
+    body = body.replace(/\s+/g, ' ').trim();
+    if (body) out.set(key(pos.r, pos.c), body);
+  }
+  return out;
+}
+
+/**
+ * 式の中の相対参照 (A1 形式、$ の付かない部分) を dr 行・dc 列ずらす。
+ * 文字列リテラルと関数名はそのまま
+ */
+export function shiftFormula(f, dr, dc) {
+  return f.split(/("(?:[^"]|"")*")/).map((part, i) => (i % 2 ? part : part.replace(
+    /(^|[^A-Za-z0-9_.$])(\$?)([A-Z]{1,3})(\$?)(\d{1,7})(?![A-Za-z0-9_(])/g,
+    (m, pre, dc$, col, dr$, row) => {
+      const c = dc$ ? colNum(col) : colNum(col) + dc;
+      const r = dr$ ? +row : +row + dr;
+      if (c < 1 || r < 1) return m;
+      return `${pre}${dc$}${colName(c)}${dr$}${r}`;
+    },
+  ))).join('');
 }
 
 export function displayValue(cell) {
@@ -361,6 +422,11 @@ export function toCellValue(type, raw) {
 function cellXml(p, ref, style, val) {
   const s = style ? ` s="${style}"` : '';
   if (val.kind === 'n') return `<${p}c r="${ref}"${s}><${p}v>${val.v}</${p}v></${p}c>`;
+  if (val.kind === 'f') {
+    // 式と、計算済みの値 (Excel で開くまで表示に使われる)
+    const v = typeof val.v === 'number' && Number.isFinite(val.v) ? `<${p}v>${val.v}</${p}v>` : '';
+    return `<${p}c r="${ref}"${s}><${p}f>${escXml(val.f)}</${p}f>${v}</${p}c>`;
+  }
   const sp = /^\s|\s$/.test(val.v) ? ' xml:space="preserve"' : '';
   return `<${p}c r="${ref}"${s} t="inlineStr"><${p}is><${p}t${sp}>${escXml(val.v)}</${p}t></${p}is></${p}c>`;
 }
@@ -481,6 +547,13 @@ export async function exportWorkbook(wb, sheet, targetCol, cardList, values) {
   const updates = [];
   for (const card of cardList) {
     if (card.locked) continue;
+    if (card.type === 'formula') {
+      // 自動計算の行: 式を書く (値は計算できたときだけ添える)
+      if (!card.formula) continue;
+      const v = toCellValue('number', values[card.row]);
+      updates.push({ row: card.row, col: targetCol, style: card.style, val: { kind: 'f', f: card.formula, v: v?.kind === 'n' ? v.v : null } });
+      continue;
+    }
     const val = toCellValue(card.type, values[card.row]);
     if (!val) continue;
     updates.push({ row: card.row, col: targetCol, style: card.style, val });

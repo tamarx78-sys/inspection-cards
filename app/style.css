@@ -119,7 +119,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 16px 16px calc(env(safe-area-
 
 .card {
   background: var(--surface); border: 1.5px solid var(--line); border-radius: var(--radius);
-  padding: 12px 14px; display: grid; gap: 8px; scroll-margin: calc(var(--topbar-h, 65px) + 90px);
+  padding: 12px 14px; display: grid; gap: 8px; align-content: start; scroll-margin: calc(var(--topbar-h, 65px) + 90px);
 }
 .card[data-state="ok"] { border-color: var(--ok); }
 .card[data-state="ok"] .field { border-color: color-mix(in srgb, var(--ok) 50%, var(--line)); }
@@ -179,6 +179,17 @@ main { max-width: 1400px; margin: 0 auto; padding: 16px 16px calc(env(safe-area-
 .card.compact .choice { min-height: 2.75rem; font-size: 1rem; }
 .card.compact[data-state="ok"] { border-color: var(--line); }
 .card.compact[data-state="ng"] { background: var(--ng-bg); }
+
+/* 備考・コメント */
+.notes { display: grid; gap: 4px; }
+.note { white-space: pre-line; font-size: 0.8125rem; color: var(--text); background: var(--warn-bg); border-radius: 8px; padding: 4px 10px; line-height: 1.4; }
+.note.prev { background: var(--chip); color: var(--muted); }
+.note-tag { font-weight: 700; font-size: 0.75rem; margin-right: 8px; color: var(--warn); }
+.note.prev .note-tag { color: var(--muted); }
+.card.compact > .notes { grid-column: 1 / -1; }
+/* 自動計算の値 */
+.formula-value { display: flex; gap: 8px; align-items: center; min-height: 3rem; font-size: 1.5rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.card.compact .formula-value { font-size: 1.25rem; min-height: 2.75rem; grid-column: 2; grid-row: 1 / span 2; }
 
 .status { font-size:0.8125rem; font-weight: 700; min-height: 0; }
 .status:empty { display: none; }

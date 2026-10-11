@@ -1,6 +1,6 @@
 // 点検表ごとの「設定ファイル」(JSON) に従ってカードを組み立てる。
 // 点検表に固有の名前・行・見出しは設定ファイル側だけに書き、このコードには持たない。
-import { colNum, colName, parseRef, displayValue } from './xlsx.js';
+import { colNum, colName, parseRef, displayValue, shiftFormula } from './xlsx.js';
 
 export const PROFILE_TYPE = 'inspection-cards-profile';
 
@@ -112,14 +112,36 @@ export function buildProfileCards(sheet, profile, targetCol) {
     const sub = text(at(r, 'sub'));
     const setText = text(at(r, 'set'));
     const kindText = text(at(r, 'kind'));
-    const min = num(text(at(r, 'min')));
-    const max = num(text(at(r, 'max')));
     let rangeKind = null;
     if (kinds.range?.some((k) => norm(k) === norm(kindText))) rangeKind = 'range';
     else if (kinds.reference?.some((k) => norm(k) === norm(kindText))) rangeKind = 'reference';
+    let min = num(text(at(r, 'min')));
+    let max = num(text(at(r, 'max')));
+    // 「設定±2」のような書き方: 設定値 ± 幅を管理幅にする (kinds.tolerance に書いた文字で始まるもの)
+    const tol = (kinds.tolerance || []).map(norm).find((k) => norm(kindText).startsWith(k));
+    if (tol && num(setText) !== null) {
+      const w = num(norm(kindText).slice(tol.length));
+      if (w !== null) {
+        const round = (x) => +x.toFixed(6);
+        min = round(num(setText) - w); max = round(num(setText) + w); rangeKind = 'range';
+      }
+    }
     const hasRange = rangeKind && (min !== null || max !== null);
     const digitsText = text(at(r, 'digits'));
     const b = base(r);
+    // コメント (メモ): 項目の列 (記録列より左) に付いたものと、前回の記録に付いたもの
+    const comments = [];
+    for (let c = 1; c < recStart; c++) { const t = sheet.comment?.(r, c); if (t) comments.push(t); }
+    // 過去の記録に付いたコメントのうち、いちばん新しいもの (日付の行があれば日付を添える)
+    let lastMemo = null;
+    for (const col of [...prevCols].reverse()) {
+      const t = sheet.comment?.(r, col);
+      if (t) {
+        const dateRow = metaRows.find((m) => m.type === 'date')?.row;
+        lastMemo = { text: t, prev: col === prevCol, date: dateRow ? text(sheet.get(dateRow, col)) : '' };
+        break;
+      }
+    }
 
     // 選択肢: 入力規則 > 設定値が属する選択肢セット
     let options = sheet.validationOptions?.(r, targetCol) || null;
@@ -150,6 +172,9 @@ export function buildProfileCards(sheet, profile, targetCol) {
       rangeText: hasRange ? `${min ?? ''}～${max ?? ''}` : '',
       kindText,
       effect: text(at(r, 'effect')),
+      note: text(at(r, 'note')), // 備考の列
+      comments,
+      lastMemo,
       digits: num(digitsText),
       options,
       type,
@@ -185,6 +210,21 @@ export function buildProfileCards(sheet, profile, targetCol) {
     }
   }
 
+  // 自動計算の行: 式を今回の列に書き、値は入力から計算して表示する。
+  // 式は設定の formula ({col} が今回の列) か、前回までの記録で最後に式が入っている列からずらして作る
+  for (const ref of profile.formulaRows || []) {
+    const c = resolve(ref, '自動計算の行');
+    if (!c || c.locked) continue;
+    let f = ref.formula ? ref.formula.replace(/^=/, '').replaceAll('{col}', colName(targetCol)) : '';
+    if (!f) {
+      const src = [...prevCols].reverse().find((col) => sheet.get(c.row, col)?.formula);
+      if (src) f = shiftFormula(sheet.get(c.row, src).formula, 0, targetCol - src);
+    }
+    if (!f) { warnings.push(`自動計算の行: キー ${ref.no} の式が前回までの記録に見つかりません (設定の formula で指定できます)`); continue; }
+    c.type = 'formula';
+    c.formula = f;
+  }
+
   // 一覧表示 (項目名と入力欄を 1 行にして縦に並べる) にする行
   for (const ref of profile.compactRows || []) {
     const c = resolve(ref, '一覧表示の行');
@@ -196,12 +236,23 @@ export function buildProfileCards(sheet, profile, targetCol) {
   const splitOrder = new Map(); // 行 → 並べ替え後の順番キー
   (profile.splitGroups || []).forEach((g, gi) => {
     const members = (g.rows || []).map((ref) => resolve(ref, '列分け表示の行')).filter(Boolean);
-    const keys = g.order || [...new Set(members.map((c) => c[g.by || 'sub']))];
+    // 分ける値: by の欄の値。pattern があれば、その欄 (既定は項目名) から正規表現で取り出す (最初の ( ) の中)
+    const by = g.by || (g.pattern ? 'label' : 'sub');
+    const re = g.pattern ? new RegExp(g.pattern) : null;
+    const keyOf = (c) => {
+      const v = String(c[by] ?? '').normalize('NFKC');
+      if (!re) return v;
+      const m = re.exec(v);
+      return m ? (m[1] ?? m[0]).trim() : '';
+    };
+    const keys = (g.order || [...new Set(members.map(keyOf))]).map((k) => String(k).normalize('NFKC'));
     for (const c of members) {
-      const key = c[g.by || 'sub'] || '';
+      const key = keyOf(c);
       c.compact = true;
       c.split = { id: gi, key };
-      if ((g.by || 'sub') === 'sub') c.hideSub = true; // 見出しに出すので行の表示からは省く
+      if (by === 'sub') c.hideSub = true; // 見出しに出すので行の表示からは省く
+      // 項目名から取り出したときは、その部分を項目名の表示から省く
+      if (re && by === 'label') c.label = c.label.normalize('NFKC').replace(re, '').trim() || c.label;
       const ki = keys.indexOf(key);
       splitOrder.set(c.row, [gi, ki < 0 ? keys.length : ki]);
     }

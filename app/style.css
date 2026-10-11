@@ -240,6 +240,16 @@ main { max-width: 1400px; margin: 0 auto; padding: 16px 16px calc(env(safe-area-
 html.keypad-open { scroll-padding-bottom: var(--keypad-h, 0px); }
 html.keypad-open main { padding-bottom: calc(var(--keypad-h, 0px) + 16px); }
 
+/* 版の表示と、新しい版を読み込んだときの案内 */
+.version-line { margin-top: 24px; font-size: 0.8125rem; }
+.update-banner {
+  position: fixed; left: 50%; top: calc(var(--topbar-h, 65px) + 8px); transform: translateX(-50%); z-index: 55;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: center;
+  width: min(560px, calc(100% - 32px)); padding: 10px 14px;
+  background: var(--surface); border: 2px solid var(--primary); border-radius: var(--radius);
+  box-shadow: 0 6px 24px rgb(0 0 0 / .15); font-weight: 600;
+}
+
 @media (max-width: 600px) {
   .keypad { flex-direction: column; gap: 8px; }
   .keypad-side { max-width: none; flex-direction: row; align-items: center; }

@@ -210,6 +210,14 @@ export function buildProfileCards(sheet, profile, targetCol) {
     }
   }
 
+  // 見出し (区分) の指定: 区分の列の値の代わりに、指定した見出しにまとめる
+  for (const g of profile.sectionRows || []) {
+    for (const ref of g.rows || []) {
+      const c = resolve(ref, `見出し「${g.section}」の行`);
+      if (c) c.section = g.section;
+    }
+  }
+
   // 自動計算の行: 式を今回の列に書き、値は入力から計算して表示する。
   // 式は設定の formula ({col} が今回の列) か、前回までの記録で最後に式が入っている列からずらして作る
   for (const ref of profile.formulaRows || []) {

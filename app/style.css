@@ -225,15 +225,32 @@ main { max-width: 1400px; margin: 0 auto; padding: 16px 16px calc(env(safe-area-
 /* テンキー: 数値入力欄にフォーカスしている間だけ画面下に出す */
 .keypad {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
-  display: flex; justify-content: flex-end; gap: 16px;
-  padding: 10px 16px calc(env(safe-area-inset-bottom) + 10px);
+  display: flex; justify-content: flex-end; gap: 4px;
+  padding: 20px 16px calc(env(safe-area-inset-bottom) + 10px);
   background: var(--surface); border-top: 1px solid var(--line); box-shadow: 0 -4px 16px rgb(0 0 0 / .08);
   user-select: none; -webkit-user-select: none; touch-action: none; /* テンキー上の指の動きでページをスクロールさせない */
 }
 .keypad-side { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: space-between; gap: 8px; }
 .keypad-title { font-weight: 700; font-size: 1.0625rem; overflow: hidden; text-overflow: ellipsis; }
 .keypad-prev { color: var(--muted); font-size: 0.875rem; font-variant-numeric: tabular-nums; }
-.keypad-keys { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; width: min(100%, 22rem); flex-shrink: 0; }
+.keypad-keys { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; width: min(100%, calc(22rem * var(--kp-w, 1))); flex-shrink: 0; }
+/* 大きさの倍率 (--kp-h 高さ / --kp-w 横幅 / --kp-f 文字) はドラッグで変える。最小は 1 (標準) */
+.keypad-keys .key { min-height: calc(3.25rem * var(--kp-h, 1)); font-size: calc(1.5rem * var(--kp-f, 1)); }
+.keypad-keys .key.fn { font-size: calc(1rem * var(--kp-f, 1)); }
+.keypad-keys .key.next { font-size: calc(1.125rem * var(--kp-f, 1)); }
+/* つまみ: 上端 (高さ) と、テンキー部分の左端 (横幅) */
+.keypad-hgrip {
+  position: absolute; left: 50%; top: 0; transform: translateX(-50%); width: 96px; height: 20px; cursor: ns-resize;
+  display: grid; place-items: center;
+}
+.keypad-hgrip::before { content: ''; width: 44px; height: 5px; border-radius: 99px; background: var(--line); }
+.keypad-wgrip { width: 22px; flex-shrink: 0; cursor: ew-resize; display: grid; place-items: center; align-self: stretch; }
+.keypad-wgrip::before { content: ''; width: 5px; height: 44px; border-radius: 99px; background: var(--line); }
+.keypad-hgrip.dragging::before, .keypad-wgrip.dragging::before { background: var(--primary); }
+.keypad-side { margin-right: 8px; }
+/* 左側が狭いときは、戻る・進むを縦に並べる */
+.keypad.keypad-narrow-side .keypad-nav { flex-direction: column; }
+.keypad.keypad-narrow-side .key.nav { max-width: none; }
 .key {
   appearance: none; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--text);
   font: inherit; font-size: 1.5rem; font-weight: 600; min-height: 3.25rem; padding: 0; cursor: pointer;
@@ -250,6 +267,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 16px 16px calc(env(safe-area-
 .key:active { filter: brightness(.9); transform: scale(.97); }
 html.keypad-open { scroll-padding-bottom: var(--keypad-h, 0px); }
 html.keypad-open main { padding-bottom: calc(var(--keypad-h, 0px) + 16px); }
+html.keypad-open .toast { bottom: calc(var(--keypad-h, 0px) + 12px); } /* 通知をテンキーに重ねない */
 
 /* 版の表示と、新しい版を読み込んだときの案内 */
 .version-line { margin-top: 24px; font-size: 0.8125rem; }
@@ -263,8 +281,9 @@ html.keypad-open main { padding-bottom: calc(var(--keypad-h, 0px) + 16px); }
 
 @media (max-width: 600px) {
   .keypad { flex-direction: column; gap: 8px; }
-  .keypad-side { max-width: none; flex-direction: row; align-items: center; }
+  .keypad-side { max-width: none; flex-direction: row; align-items: center; margin-right: 0; }
   .keypad-keys { width: 100%; }
+  .keypad-wgrip { display: none; } /* 狭い画面ではテンキーが横幅いっぱいなので、横幅は変えない */
   .cards { grid-template-columns: 1fr; }
   .seg { padding: 6px 10px; }
 }

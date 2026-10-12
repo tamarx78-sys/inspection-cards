@@ -803,10 +803,15 @@ const keypad = (() => {
     else setValue((fresh ? '' : target.value) + act);
   };
   const key = (text, act, cls = '') => el('button', { type: 'button', class: `key ${cls}`, dataset: { act } }, text);
+  // 大きさを変えるつまみ: 上端で高さ、テンキー部分の左端で横幅
+  const hGrip = el('div', { class: 'keypad-hgrip', title: '上下にドラッグで高さを変更 (ダブルタップで元に戻す)' });
+  const wGrip = el('div', { class: 'keypad-wgrip', title: '左右にドラッグで横幅を変更 (ダブルタップで元に戻す)' });
   const pad = el('div', { class: 'keypad', hidden: true },
+    hGrip,
     el('div', { class: 'keypad-side' }, label,
       el('div', { class: 'keypad-nav' }, key('▲ 戻る', 'prev', 'nav'), key('▼ 進む', 'next', 'nav')),
       key('閉じる', 'close', 'close')),
+    wGrip,
     el('div', { class: 'keypad-keys' },
       key('7', '7'), key('8', '8'), key('9', '9'), key('-', '-'),
       key('4', '4'), key('5', '5'), key('6', '6'), key('BS', 'back', 'fn'),
@@ -822,6 +827,81 @@ const keypad = (() => {
     if (pad.hidden) swallowUntil = Date.now() + 400;
   });
   document.body.append(pad);
+
+  // ---- 大きさの調整 (端末ごと・縦向き/横向きごとに記憶。最小は標準の大きさ) ----
+  const sizeKey = () => `keypadSize:${window.innerWidth > window.innerHeight ? 'landscape' : 'portrait'}`;
+  let size = { h: 1, w: 1 }; // 記憶している倍率
+  const applied = { h: 1, w: 1 }; // 今かかっている倍率 (画面に収まるよう size を抑えたもの)
+  const rem = () => parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+  const BASE_KEY_H = 3.25; // rem (CSS の .key と同じ)
+  const BASE_KEYS_W = 22; // rem (CSS の .keypad-keys と同じ)
+  const SIDE_MIN = 11; // rem: 左側 (戻る・進むなど) に最低限残す幅
+  /** 今の画面で取れる最大の倍率 */
+  function limits() {
+    const r = rem();
+    const cs = getComputedStyle(pad);
+    const innerW = pad.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    const fixedW = wGrip.offsetWidth + 2 * (parseFloat(cs.columnGap) || 0);
+    const maxW = Math.max(1, (innerW - fixedW - SIDE_MIN * r) / (BASE_KEYS_W * r));
+    // 高さ: テンキー全体が画面の半分を超えない。倍率 1 のときの高さから、キー 4 段ぶんの伸びで割る
+    const step = 4 * BASE_KEY_H * r; // 倍率が 1 増えたときの高さの増え方
+    const baseH = pad.offsetHeight - step * (applied.h - 1);
+    const maxH = Math.max(1, 1 + (window.innerHeight * 0.5 - baseH) / step);
+    return { maxW, maxH };
+  }
+  function applySize({ save = false } = {}) {
+    const { maxW, maxH } = limits();
+    const h = Math.min(Math.max(size.h, 1), maxH);
+    const w = Math.min(Math.max(size.w, 1), maxW);
+    applied.h = h; applied.w = w;
+    pad.style.setProperty('--kp-h', h.toFixed(3));
+    pad.style.setProperty('--kp-w', w.toFixed(3));
+    pad.style.setProperty('--kp-f', Math.min(h, w).toFixed(3)); // 文字はキーの短い辺に合わせる
+    pad.classList.toggle('keypad-narrow-side', w > 1 && (maxW - w) * BASE_KEYS_W < 4); // 左側が狭いときは縦に並べる
+    if (save) { try { localStorage.setItem(sizeKey(), JSON.stringify(size)); } catch {} }
+    if (!pad.hidden) {
+      document.documentElement.style.setProperty('--keypad-h', `${pad.offsetHeight}px`);
+    }
+  }
+  function loadSize() {
+    try { size = { h: 1, w: 1, ...JSON.parse(localStorage.getItem(sizeKey()) || '{}') }; } catch { size = { h: 1, w: 1 }; }
+  }
+  /** つまみのドラッグ。axis: 'h' (上下) / 'w' (左右)。ダブルタップで標準に戻す */
+  function dragGrip(grip, axis) {
+    let start = null;
+    let lastTap = 0;
+    grip.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (Date.now() - lastTap < 350) { size[axis] = 1; applySize({ save: true }); reveal(); lastTap = 0; return; }
+      lastTap = Date.now();
+      grip.setPointerCapture(e.pointerId);
+      start = { x: e.clientX, y: e.clientY, v: Math.min(size[axis], axis === 'h' ? limits().maxH : limits().maxW) };
+      grip.classList.add('dragging');
+    });
+    grip.addEventListener('pointermove', (e) => {
+      if (!start) return;
+      const r = rem();
+      // 上へ・左へ動かすと大きくなる
+      const d = axis === 'h' ? (start.y - e.clientY) / (4 * BASE_KEY_H * r) : (start.x - e.clientX) / (BASE_KEYS_W * r);
+      if (Math.abs(d) > 0.02) lastTap = 0; // 動かしたらダブルタップとみなさない
+      const { maxW, maxH } = limits();
+      size[axis] = Math.min(Math.max(start.v + d, 1), axis === 'h' ? maxH : maxW);
+      applySize();
+    });
+    const end = () => {
+      if (!start) return;
+      start = null;
+      grip.classList.remove('dragging');
+      applySize({ save: true });
+      reveal();
+    };
+    grip.addEventListener('pointerup', end);
+    grip.addEventListener('pointercancel', end);
+  }
+  dragGrip(hGrip, 'h');
+  dragGrip(wGrip, 'w');
+  loadSize();
 
   /** 入力中の項目がテンキーに隠れていれば、見える位置まで一瞬でずらす */
   function reveal() {
@@ -847,7 +927,7 @@ const keypad = (() => {
       card?.prev ? el('div', { class: 'keypad-prev' }, `前回 ${prevText(card)}`) : null);
     pad.hidden = false;
     document.documentElement.classList.add('keypad-open');
-    document.documentElement.style.setProperty('--keypad-h', `${pad.offsetHeight}px`);
+    applySize();
   }
   function hide() {
     if (target) applyFilterLater();
@@ -888,8 +968,9 @@ const keypad = (() => {
   });
   // 回転などで高さが変わったら、入力中の項目を見える位置に戻す
   window.addEventListener('resize', () => {
+    loadSize(); // 縦向き・横向きで別々に記憶している
     if (pad.hidden) return;
-    document.documentElement.style.setProperty('--keypad-h', `${pad.offsetHeight}px`);
+    applySize();
     target?.closest('.card')?.scrollIntoView({ block: 'center' });
   });
   return { show, hide, reveal, isOpen: () => !pad.hidden };

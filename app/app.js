@@ -361,10 +361,28 @@ function recalcFormulas() {
   for (const n of main.querySelectorAll('.card.is-formula')) n._refresh?.();
 }
 
+// テンキーで入力中 (まだ確定していない) の行。判定・自動計算は確定してから行う
+// (打っている途中の値で「管理値外」を出さないため)。確定 = Enter・戻る・進む・閉じる・別の欄へ移る
+let editingRow = null;
+/** 画面に出す判定 (入力中の行は判定しない) */
+function shownJudge(card) {
+  const j = judge(card, S.session.values[card.row]);
+  return editingRow === card.row && j.state !== 'empty' ? { state: 'editing' } : j;
+}
+function beginEditing(row) { editingRow = row; }
+function endEditing() {
+  if (editingRow === null) return;
+  const row = editingRow;
+  editingRow = null;
+  recalcFormulas();
+  main.querySelector(`.card[data-row="${row}"]`)?._refresh?.();
+  updateProgress();
+}
+
 function updateProgress() {
   const list = requiredCards();
   const done = list.filter((c) => judge(c, S.session.values[c.row]).state !== 'empty').length;
-  const ng = targetCards().filter((c) => judge(c, S.session.values[c.row]).state === 'ng').length;
+  const ng = targetCards().filter((c) => shownJudge(c).state === 'ng').length;
   $('#progress-text').textContent = `${done} / ${list.length}`;
   $('#progress-bar').style.width = `${list.length ? (done / list.length) * 100 : 0}%`;
   $('#ng-count').textContent = ng ? `管理値外 ${ng}` : '';
@@ -374,7 +392,7 @@ function applyFilter() {
   for (const node of main.querySelectorAll('.card[data-row]')) {
     const card = node._card;
     node._refresh?.();
-    const j = judge(card, S.session.values[card.row]);
+    const j = shownJudge(card);
     const show = applicable(card) && (
       S.filter === 'all' || (S.filter === 'empty' && isEmptyRequired(card)) || (S.filter === 'ng' && j.state === 'ng'));
     node.hidden = !show;
@@ -393,7 +411,7 @@ function setValue(card, value, { fromPrev = false } = {}) {
   else delete session.fromPrev[card.row];
   delete session.auto[card.row];
   if (card.type === 'name') localStorage.setItem('lastName', value);
-  recalcFormulas();
+  if (editingRow !== card.row) recalcFormulas(); // 入力中は確定してから計算する
   scheduleSave();
   if (card.conditionSource) applyFilter(); // 条件の元になる項目が変わると、対象の行が変わる
   updateProgress();
@@ -493,7 +511,7 @@ function renderCard(card) {
   const autoBadge = el('span', { class: 'badge prev-badge' }, '自動');
   let input;
   const refresh = () => {
-    const j = judge(card, S.session.values[card.row]);
+    const j = shownJudge(card);
     node.dataset.state = j.state;
     status.textContent = j.msg || '';
     prevBadge.hidden = !S.session.fromPrev[card.row];
@@ -783,6 +801,7 @@ const keypad = (() => {
   const label = el('div', { class: 'keypad-label' });
   const setValue = (v) => {
     fresh = false;
+    beginEditing(target.closest('.card')?._card?.row ?? null);
     target.classList.remove('keypad-fresh');
     target.value = v;
     target.dispatchEvent(new Event('input', { bubbles: true }));
@@ -800,6 +819,7 @@ const keypad = (() => {
     if (!target) return;
     // 入力欄が消えた・隠れた (絞り込みなど) ときは閉じる
     if (!target.isConnected || target.closest('.card')?.hidden) { hide(); return; }
+    if (['enter', 'prev', 'next', 'close'].includes(act)) endEditing(); // 確定 (移れなかったときも判定を出す)
     if (actions[act]) actions[act]();
     else setValue((fresh ? '' : target.value) + act);
   };
@@ -914,6 +934,7 @@ const keypad = (() => {
     else if (r.top < top) window.scrollBy(0, r.top - top);
   }
   function show(input) {
+    endEditing(); // 別の欄へ移る = 確定
     if (target && target !== input) applyFilterLater(); // 入力を終えた欄の絞り込みを反映 (フォーカス外れの代わり)
     target?.classList.remove('keypad-target', 'keypad-fresh');
     target = input;
@@ -931,6 +952,7 @@ const keypad = (() => {
     applySize();
   }
   function hide() {
+    endEditing();
     if (target) applyFilterLater();
     target?.classList.remove('keypad-target', 'keypad-fresh');
     target = null;

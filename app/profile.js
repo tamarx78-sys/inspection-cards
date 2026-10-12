@@ -21,10 +21,43 @@ export function parseProfile(json) {
   return p;
 }
 
-/** このブックに使える設定か */
+/**
+ * このブックに使える設定か。fileMatch があればファイル名で判断する (シート名は改訂で変わることがあるため見ない)。
+ * fileMatch がなければ、設定のシート名のシートがあるか
+ */
 export function profileMatches(profile, wb, fileName) {
-  if (!wb.sheets.some((s) => s.name === profile.sheet)) return false;
-  return !profile.fileMatch || fileName.includes(profile.fileMatch);
+  if (profile.fileMatch) return String(fileName).normalize('NFKC').includes(String(profile.fileMatch).normalize('NFKC'));
+  return wb.sheets.some((s) => s.name === profile.sheet);
+}
+
+/** 列の見出しの確認 (表の形が変わっていないか)。合わない箇所の説明の配列を返す */
+export function checkHeaders(sheet, profile) {
+  const out = [];
+  for (const [ref, expect] of Object.entries(profile.headerCheck || {})) {
+    const p = parseRef(ref);
+    const got = p ? text(sheet.valueAt(p.r, p.c)) : '';
+    if (norm(got) !== norm(expect)) out.push(`見出し ${ref} が「${expect}」ではありません (実際: 「${got}」)`);
+  }
+  return out;
+}
+
+/**
+ * この設定で使えるシートの候補。列の見出し (headerCheck) がすべて合うシート。
+ * headerCheck がない設定は、設定のシート名のシートだけ。
+ * 返り値: { candidates: [シート名], named: { name, problems } | null (設定のシート名のシートの確認結果) }
+ */
+export async function profileSheets(profile, wb, loadSheet) {
+  const hasCheck = Object.keys(profile.headerCheck || {}).length > 0;
+  const candidates = [];
+  let named = null;
+  for (const meta of wb.sheets) {
+    if (!hasCheck && meta.name !== profile.sheet) continue;
+    const sheet = await loadSheet(wb, meta);
+    const problems = checkHeaders(sheet, profile);
+    if (meta.name === profile.sheet) named = { name: meta.name, problems };
+    if (!problems.length) candidates.push(meta.name);
+  }
+  return { candidates, named };
 }
 
 /**
@@ -37,11 +70,7 @@ export function buildProfileCards(sheet, profile, targetCol) {
   const at = (r, key) => (C[key] ? sheet.get(r, C[key]) : null);
 
   // 見出しの確認 (表の形が変わっていないか)
-  for (const [ref, expect] of Object.entries(profile.headerCheck || {})) {
-    const p = parseRef(ref);
-    const got = p ? text(sheet.valueAt(p.r, p.c)) : '';
-    if (norm(got) !== norm(expect)) warnings.push(`見出し ${ref} が「${expect}」ではありません (実際: 「${got}」)`);
-  }
+  warnings.push(...checkHeaders(sheet, profile));
 
   // 基本情報 (日付・時間・担当など)
   const labelCol = colNum(profile.meta.labelCol);

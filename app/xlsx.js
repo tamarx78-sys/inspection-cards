@@ -103,8 +103,14 @@ function richText(node) {
     .join('');
 }
 
-/** シートを読み込み、セル・結合情報を返す */
-export async function loadSheet(wb, sheet) {
+/** シートを読み込み、セル・結合情報を返す (同じワークブックでは読み込んだ結果を使い回す) */
+export function loadSheet(wb, sheet) {
+  wb.sheetCache ??= new Map();
+  if (!wb.sheetCache.has(sheet.path)) wb.sheetCache.set(sheet.path, parseSheet(wb, sheet));
+  return wb.sheetCache.get(sheet.path);
+}
+
+async function parseSheet(wb, sheet) {
   const text = await wb.zip.readText(sheet.path);
   const doc = parseXml(text);
   const cells = new Map();

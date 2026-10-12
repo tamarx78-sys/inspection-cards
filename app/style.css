@@ -284,8 +284,24 @@ html.keypad-open .toast { bottom: calc(var(--keypad-h, 0px) + 12px); } /* 通知
   box-shadow: 0 6px 24px rgb(0 0 0 / .15); font-weight: 600;
 }
 
+.key .k-narrow { display: none; }
+
+/* 狭い画面 (iPhone など): 入力できる範囲を広げるため、絞り込みの行・区分の見出しを出さず、
+   テンキーの戻る・進む・閉じるは記号だけにして高さを詰める (利用者の指定) */
 @media (max-width: 600px) {
-  .keypad { flex-direction: column; gap: 8px; }
+  .toolbar-row { display: none; }
+  .section-title { display: none; }
+  .section { margin-top: 8px; }
+  .key .k-label { display: none; }
+  .key .k-narrow { display: inline; }
+  .keypad-nav { gap: 6px; }
+  .key.nav { flex: 0 0 3.25rem; min-height: 2.5rem; font-size: 1.125rem; }
+  .key.close { min-height: 2.5rem; padding: 0 14px; font-size: 1.375rem; }
+  /* 項目名と前回値を 1 行に (長ければ省略) */
+  .keypad-label { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; white-space: nowrap; overflow: hidden; }
+  .keypad-title { font-size: 1rem; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .keypad-prev { flex-shrink: 0; font-size: 0.8125rem; }
+  .keypad { flex-direction: column; gap: 6px; padding-top: 16px; }
   .keypad-side { max-width: none; flex-direction: row; align-items: center; margin-right: 0; }
   .keypad-keys { width: 100%; }
   .keypad-wgrip { display: none; } /* 狭い画面ではテンキーが横幅いっぱいなので、横幅は変えない */

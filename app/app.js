@@ -887,8 +887,11 @@ const keypad = (() => {
   const pad = el('div', { class: 'keypad', hidden: true },
     hGrip,
     el('div', { class: 'keypad-side' }, label,
-      el('div', { class: 'keypad-nav' }, key('▲ 戻る', 'prev', 'nav'), key('▼ 進む', 'next', 'nav')),
-      key('閉じる', 'close', 'close')),
+      // 狭い画面 (iPhone) では記号だけにして高さを詰める (k-label を CSS で隠す)
+      el('div', { class: 'keypad-nav' },
+        key([el('span', {}, '▲'), el('span', { class: 'k-label' }, ' 戻る')], 'prev', 'nav'),
+        key([el('span', {}, '▼'), el('span', { class: 'k-label' }, ' 進む')], 'next', 'nav')),
+      key([el('span', { class: 'k-narrow' }, '×'), el('span', { class: 'k-label' }, '閉じる')], 'close', 'close')),
     wGrip,
     el('div', { class: 'keypad-keys' },
       key('7', '7'), key('8', '8'), key('9', '9'), key('-', '-'),

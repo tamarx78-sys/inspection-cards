@@ -678,8 +678,9 @@ function showCards() {
     el('div', { class: 'section' },
       el('h2', { class: 'section-title' }, '基本情報'),
       el('div', { class: 'cards' }, cards.meta.map(renderCard))),
-    groups.map((g) => el('div', { class: 'section' },
-      el('h2', { class: 'section-title' }, g.name || '項目'),
+    // 直前と同じ見出しが続くとき (一覧表示とカードの切り替わりなど) は、見出しを繰り返さない
+    groups.map((g, i) => el('div', { class: 'section' },
+      i > 0 && groups[i - 1].name === g.name ? null : el('h2', { class: 'section-title' }, g.name || '項目'),
       renderGroupBody(g))),
     el('div', { class: 'bottom-space' }),
   );

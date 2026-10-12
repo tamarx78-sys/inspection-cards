@@ -157,6 +157,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 16px 16px calc(env(safe-area-
 .attention { margin-top: 12px; background: var(--ng-bg); border: 1.5px solid var(--ng); border-radius: var(--radius); padding: 8px 14px; font-size: 0.875rem; }
 .attention p:first-child { color: var(--ng); font-weight: 700; }
 .attention ul { margin: 4px 0; padding-left: 20px; }
+.attention summary { cursor: pointer; color: var(--muted); margin-top: 4px; }
 
 /* 一覧表示: 項目名 | 入力欄 を 1 行にして縦に並べる (紙の点検表と横に置いて見比べやすく) */
 .compact-list {

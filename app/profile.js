@@ -213,6 +213,9 @@ export function buildProfileCards(sheet, profile, targetCol) {
 
   // 設定の「行の指定」を解決する ({no, name} → 行)。名前が違えば警告して使わない
   const itemByRow = new Map(items.map((c) => [c.row, c]));
+  // 設定に控えてある行番号 (_row) と実際の行が違う = 行が増減した。キーと項目名が合えば使うが、
+  // 行番号で書いた式 (formula) などがずれるおそれがあるので知らせる
+  const moved = new Map();
   const resolve = (ref, what) => {
     const r = byKey.get(norm(ref.no));
     if (!r) { warnings.push(`${what}: キー ${ref.no} の行が見つかりません`); return null; }
@@ -221,6 +224,7 @@ export function buildProfileCards(sheet, profile, targetCol) {
       warnings.push(`${what}: キー ${ref.no} の項目名が「${ref.name}」ではありません (実際: 「${card.label}」)`);
       return null;
     }
+    if (card && Number.isInteger(ref._row) && ref._row !== card.row) moved.set(card.row, `キー ${ref.no} ${ref.name || ''}: ${ref._row} → ${card.row} 行目`);
     return card;
   };
 
@@ -358,6 +362,11 @@ export function buildProfileCards(sheet, profile, targetCol) {
       cond.defaultOption = score[best] > 0 ? best : null;
     }
     conditions.push(cond);
+  }
+
+  if (moved.size) {
+    const ex = [...moved.values()];
+    warnings.push(`行の位置が設定と変わっています (${moved.size} か所。例: ${ex.slice(0, 3).join(' / ')}${ex.length > 3 ? ' ほか' : ''})`);
   }
 
   // 列分け表示のかたまりは、最初の行の位置にまとめて置き、値ごとの順に並べ替える

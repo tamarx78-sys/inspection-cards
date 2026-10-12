@@ -58,6 +58,9 @@ async function makeCards(wb, sheetName, profile, targetCol) {
   return { sheet, cards: buildCards(sheet, layout, targetCol ?? layout.targetCol), layout };
 }
 
+// 点検表が設定と合わない (行の増減など) ときの注意の文言 (利用者の指定)
+const REVISED_MSG = '点検表が改定されたため正しく入力できない可能性があります。Excelによる入力をお勧めします。';
+
 // ---------------- ホーム ----------------
 async function showHome() {
   S = null;
@@ -249,10 +252,11 @@ async function showSetup({ fileName, bytes, wb, profiles }) {
         rememberedSheet === sheetName
           ? `前回選んだシートです (ほかに ${candidates.filter((n) => n !== sheetName).map((n) => `「${n}」`).join('、')} も設定に合います)。`
           : `この設定に合うシートがほかにもあります (${candidates.filter((n) => n !== sheetName).map((n) => `「${n}」`).join('、')})。入力するシートで合っているか確認してください。`) : null,
+      // 行が設定と合わない (行の増減など) ときは注意にとどめ、入力は止めない (利用者の指定)
       cards.warnings.length ? el('div', { class: 'attention' },
-        el('p', {}, '設定ファイルと表が合わない箇所があります。項目の追加・変更など、表が改訂された可能性があります。'),
-        el('p', {}, '該当する振り分けは使わず、行をすべて表示します。カードの内容が点検表と合わない場合は、Excel で入力してください。'),
-        el('ul', {}, cards.warnings.map((w) => el('li', {}, w)))) : null,
+        el('p', {}, REVISED_MSG),
+        el('details', {}, el('summary', {}, `設定と合わない箇所 (${cards.warnings.length} 件)`),
+          el('ul', {}, cards.warnings.map((w) => el('li', {}, w))))) : null,
     ]);
   }
 
@@ -745,7 +749,7 @@ function showCards() {
         el('div', { class: 'segs' }, filterBtns),
         el('button', { class: 'btn ghost', onclick: jumpToFirstEmpty }, '未入力へ ↓')),
     ),
-    cards.warnings.length ? el('p', { class: 'warn' }, `設定ファイルと合わない箇所が ${cards.warnings.length} 件あります (開くときの画面で確認できます)`) : null,
+    cards.warnings.length ? el('div', { class: 'attention' }, el('p', {}, REVISED_MSG)) : null,
     el('div', { class: 'section' },
       el('h2', { class: 'section-title' }, '基本情報'),
       el('div', { class: 'cards' }, cards.meta.map(renderCard))),

@@ -2,7 +2,7 @@ import {
   openWorkbook, loadSheet, detectLayout, buildCards, exportWorkbook, toCellValue, colName, displayValue,
 } from './xlsx.js';
 import {
-  parseProfile, profileMatches, buildProfileCards, conditionValues, isApplicable,
+  parseProfile, profileMatches, profileSheets, buildProfileCards, conditionValues, isApplicable,
 } from './profile.js';
 import {
   putSession, getSession, deleteSession, listSessions, requestPersist, putProfile, deleteProfile, listProfiles,
@@ -158,17 +158,59 @@ async function showSetup({ fileName, bytes, wb, profiles }) {
   const profileSel = el('select', { class: 'field' },
     profiles.map((p, i) => el('option', { value: i }, p.name)),
     el('option', { value: '' }, '設定なし (自動判定)'));
-  const sheetSel = el('select', { class: 'field' }, wb.sheets.map((s, i) => el('option', { value: i }, s.name)));
+  const sheetSel = el('select', { class: 'field' });
   const sheetLbl = el('label', { class: 'lbl' }, 'シート', sheetSel);
+  let sheetCheck = null; // 設定を使うときのシートの候補 ({ candidates, named })
+  // 候補が複数あるときに選んだシートを、設定ごとに覚えておく。候補の組み合わせが変わったら (シートが増えたなど) 選び直してもらう
+  const choiceKey = (profile) => `sheetChoice:${profile.name}`;
+  const loadChoice = (profile, names) => {
+    try {
+      const c = JSON.parse(localStorage.getItem(choiceKey(profile)) || 'null');
+      return c && JSON.stringify(c.candidates) === JSON.stringify(names) && names.includes(c.chosen) ? c.chosen : null;
+    } catch { return null; }
+  };
+  let rememberedSheet = null;
+
+  /** シートの選択肢を作る。設定を使うときは列の見出しが合うシートだけ (シート名は改訂で変わるため名前では決めない) */
+  async function fillSheets() {
+    const profile = profileSel.value === '' ? null : profiles[+profileSel.value];
+    sheetCheck = profile ? await profileSheets(profile, wb, loadSheet) : null;
+    const names = sheetCheck ? sheetCheck.candidates : wb.sheets.map((x) => x.name);
+    rememberedSheet = profile && names.length > 1 ? loadChoice(profile, names) : null;
+    sheetSel.replaceChildren(
+      // 候補が複数あるときは選ぶまで始められないようにする (知らないうちに古いシートへ書かないため)
+      sheetCheck && names.length > 1 && !rememberedSheet ? el('option', { value: '', selected: true }, '— シートを選んでください —') : null,
+      ...names.map((n) => el('option', { value: n, selected: n === rememberedSheet }, n)));
+  }
   const colSel = el('select', { class: 'field' });
   const info = el('div', { class: 'setup-info' });
   const startBtn = el('button', { class: 'btn primary big' }, '入力をはじめる');
   let current = null; // { profile, sheetName, sheet, cards }
 
+  const excelHint = 'アプリでは入力できないので、この点検表は Excel で入力してください (設定ファイルの更新が必要です)。';
   async function refresh() {
     const profile = profileSel.value === '' ? null : profiles[+profileSel.value];
-    sheetLbl.hidden = !!profile || wb.sheets.length < 2;
-    const sheetName = profile ? profile.sheet : wb.sheets[+sheetSel.value].name;
+    const candidates = sheetCheck?.candidates || [];
+    sheetLbl.hidden = profile ? candidates.length < 2 : wb.sheets.length < 2;
+    const stop = (...msg) => {
+      current = null;
+      info.replaceChildren(el('div', { class: 'attention' }, msg));
+      colSel.replaceChildren();
+      startBtn.disabled = true;
+    };
+    if (profile && !candidates.length) {
+      // 列の見出しが合うシートがない = 表の形が変わった
+      stop(el('p', {}, `この点検表は、設定「${profile.name}」と表の形 (列の見出し) が合いません。表が改訂された可能性があります。`),
+        el('p', {}, excelHint),
+        sheetCheck?.named?.problems.length ? el('ul', {}, sheetCheck.named.problems.map((w) => el('li', {}, w))) : null);
+      return;
+    }
+    if (profile && candidates.length > 1 && !sheetSel.value) {
+      stop(el('p', {}, `この設定に合うシートが ${candidates.length} つあります: ${candidates.map((n) => `「${n}」`).join('、')}`),
+        el('p', {}, '入力するシートを選んでください。表が改訂されて新しいシートが追加された可能性があります。'));
+      return;
+    }
+    const sheetName = sheetSel.value || candidates[0] || wb.sheets[0]?.name;
     try {
       const { sheet, cards } = await makeCards(wb, sheetName, profile);
       current = { profile, sheetName, sheet, cards };
@@ -201,17 +243,27 @@ async function showSetup({ fileName, bytes, wb, profiles }) {
         cards.conditions.length ? [el('dt', {}, '条件'), el('dd', {}, cards.conditions.map((c) => c.label).join('・'))] : null,
         el('dt', {}, '前回の記録'), el('dd', {}, cards.prevCol ? `${colName(cards.prevCol)}列` : 'なし'),
       ),
-      cards.warnings.length ? el('div', { class: 'warn-box' },
-        el('p', { class: 'warn' }, '設定ファイルと表が合わない箇所があります。該当する振り分けは使わず、行をすべて表示します:'),
+      profile && sheetName !== profile.sheet ? el('p', { class: 'hint' },
+        `シート名が設定 (「${profile.sheet}」) と違いますが、列の見出しが合うのでこのシートを使います。`) : null,
+      profile && candidates.length > 1 ? el('p', { class: rememberedSheet === sheetName ? 'hint' : 'warn' },
+        rememberedSheet === sheetName
+          ? `前回選んだシートです (ほかに ${candidates.filter((n) => n !== sheetName).map((n) => `「${n}」`).join('、')} も設定に合います)。`
+          : `この設定に合うシートがほかにもあります (${candidates.filter((n) => n !== sheetName).map((n) => `「${n}」`).join('、')})。入力するシートで合っているか確認してください。`) : null,
+      cards.warnings.length ? el('div', { class: 'attention' },
+        el('p', {}, '設定ファイルと表が合わない箇所があります。項目の追加・変更など、表が改訂された可能性があります。'),
+        el('p', {}, '該当する振り分けは使わず、行をすべて表示します。カードの内容が点検表と合わない場合は、Excel で入力してください。'),
         el('ul', {}, cards.warnings.map((w) => el('li', {}, w)))) : null,
     ]);
   }
 
-  profileSel.addEventListener('change', refresh);
+  profileSel.addEventListener('change', async () => { await fillSheets(); refresh(); });
   sheetSel.addEventListener('change', refresh);
   startBtn.addEventListener('click', async () => {
     const targetCol = +colSel.value;
     const { profile, sheetName } = current;
+    if (profile && sheetCheck?.candidates.length > 1) {
+      try { localStorage.setItem(choiceKey(profile), JSON.stringify({ candidates: sheetCheck.candidates, chosen: sheetName })); } catch {}
+    }
     const { sheet, cards } = await makeCards(wb, sheetName, profile, targetCol);
     const values = {};
     // 基本情報は今日の日付・現在時刻・前回の名前で埋めておく
@@ -252,6 +304,7 @@ async function showSetup({ fileName, bytes, wb, profiles }) {
     ),
   );
   if (!profiles.length) profileSel.value = '';
+  await fillSheets();
   await refresh();
 }
 

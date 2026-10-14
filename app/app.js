@@ -773,12 +773,9 @@ async function showExport() {
     toast(e.message, 'error');
     return;
   }
-  // 書き込み済みファイルを 1 つだけ、元の名前_記入済_日時 で出す (元のファイルはそのまま残るのでバックアップは出さない)。
-  // iPad・iPhone の「ファイル」は同じ名前を置き換えず番号を付けるため、日時で名前を分ける
-  const d = new Date();
-  const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}`;
-  const m = /^(.*?)(\.[^.]+)?$/.exec(session.fileName);
-  const name = `${baseName(m[1])}_記入済_${stamp}${m[2] || '.xlsx'}`;
+  // 書き込み済みファイルを 1 つだけ、元と同じ名前で出す (元のファイルはそのまま残るのでバックアップは出さない)。
+  // iPad・iPhone の「ファイル」は同じ名前を置き換えず「 2」「 3」と番号を付けて保存する。古いものは利用者が消す
+  const name = session.fileName;
   const type = /\.xlsm$/i.test(name) ? 'application/vnd.ms-excel.sheet.macroEnabled.12' : result.blob.type;
   const file = new File([result.blob], name, { type });
   const files = [file];
@@ -822,7 +819,7 @@ async function showExport() {
         el('ul', {}, ng.map((c) => el('li', {}, `${where(c)}: ${session.values[c.row]}${c.rangeText ? ` (管理 ${c.rangeText})` : c.setText ? ` (設定 ${c.setText})` : ''}`)))) : null,
       el('div', { class: 'files' },
         el('div', {}, el('span', { class: 'badge ok' }, '記入済'), ' ', name)),
-      el('p', { class: 'hint' }, '元のファイルは変更されずに残ります。次回はこの記入済のファイルを開いて続きを入力してください。'),
+      el('p', { class: 'hint' }, '同じ名前のファイルがあると、末尾に番号が付いて保存されます (元のファイルは変更されずに残ります)。次回は番号のいちばん大きいファイルを開いてください。'),
       el('div', { class: 'modal-actions' },
         canShare && isIOS ? el('button', { class: 'btn primary big', onclick: share }, '共有 / 「ファイル」に保存') : null,
         el('button', { class: `btn ${canShare && isIOS ? '' : 'primary'} big`, onclick: download }, 'ダウンロード'),
@@ -832,16 +829,6 @@ async function showExport() {
   );
   const close = () => dlg.remove();
   document.body.append(dlg);
-}
-
-// 書き出し名の元になる名前。保存時に付いた番号 (「 2」) と、前回の書き出しの「_記入済_日時」(後ろの「 (1)」なども) を外す
-function baseName(stem) {
-  let s = stem;
-  for (let prev = ''; prev !== s;) {
-    prev = s;
-    s = s.replace(/\s+\d+$/, '').replace(/_(?:記入済|backup)_\d{8}_\d{4}(?:\s*\(\d+\)|-\d+)?$/, '');
-  }
-  return s || stem;
 }
 
 // ---------------- 文字サイズ・画面の向き ----------------

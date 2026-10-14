@@ -231,6 +231,7 @@ input.field::-webkit-date-and-time-value { text-align: left; }
 .toast {
   position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 24px); z-index: 60;
   transform: translate(-50%, 20px); opacity: 0; transition: .25s;
+  pointer-events: none; /* 見せるだけ。下のつまみ・キーの操作を邪魔しない */
   background: #222a; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
   color: #fff; padding: 10px 18px; border-radius: 12px; font-weight: 600; max-width: calc(100% - 32px);
 }
@@ -246,7 +247,7 @@ input.field::-webkit-date-and-time-value { text-align: left; }
   background: var(--surface); border-top: 1px solid var(--line); box-shadow: 0 -4px 16px rgb(0 0 0 / .08);
   user-select: none; -webkit-user-select: none; touch-action: none; /* テンキー上の指の動きでページをスクロールさせない */
 }
-.keypad-side { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: space-between; gap: 8px; }
+.keypad-side { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: space-between; gap: 8px; margin-right: 8px; }
 .keypad-title { font-weight: 700; font-size: 1.0625rem; overflow: hidden; text-overflow: ellipsis; }
 .keypad-prev { color: var(--muted); font-size: 0.875rem; font-variant-numeric: tabular-nums; }
 .keypad-keys { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; width: min(100%, calc(22rem * var(--kp-w, 1))); flex-shrink: 0; }
@@ -263,7 +264,6 @@ input.field::-webkit-date-and-time-value { text-align: left; }
 .keypad-wgrip { width: 22px; flex-shrink: 0; cursor: ew-resize; display: grid; place-items: center; align-self: stretch; }
 .keypad-wgrip::before { content: ''; width: 5px; height: 44px; border-radius: 99px; background: var(--line); }
 .keypad-hgrip.dragging::before, .keypad-wgrip.dragging::before { background: var(--primary); }
-.keypad-side { margin-right: 8px; }
 /* 左側が狭いときは、戻る・進むを縦に並べる */
 .keypad.keypad-narrow-side .keypad-nav { flex-direction: column; }
 .keypad.keypad-narrow-side .key.nav { max-width: none; }

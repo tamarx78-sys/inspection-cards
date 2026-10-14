@@ -14,8 +14,12 @@ iPad の Safari から Excel の点検表 (.xlsx / .xlsm) を読み込み、設�
 
 | パス | 役割 |
 |---|---|
-| `app/app.js` | 画面 (ホーム / 列選択 / カード入力 / 書き出し)。DOM は `el()` ヘルパーで組み立てる |
-| `app/xlsx.js` | シート解析 (`loadSheet`)、設定なしのレイアウト推定 (`detectLayout` / `buildCards`)、セル XML の差し替え (`patchSheetXml` / `exportWorkbook`) |
+| `app/app.js` | 画面 (ホーム / 列選択 / カード入力 / 書き出し)・判定・保存・自動計算の呼び出し |
+| `app/dom.js` | 画面部品のヘルパー (`$` / `el()` / `add` / `toast`) |
+| `app/keypad.js` | アプリ内テンキー (`createKeypad(hooks)`)。確定・移動などは app.js から hooks で受け取る |
+| `app/update.js` | 最新版の確認とホームの「アプリの版」表示 (`initUpdateCheck`) |
+| `app/formula.js` | 自動計算の行の簡易計算 (`evaluate`。eval を使わない) |
+| `app/xlsx.js` | シート解析 (`loadSheet`、コメント・共有数式も)、カードの共通部分 (`baseCard`)、設定なしのレイアウト推定 (`detectLayout` / `buildCards`)、セル XML の差し替え (`patchSheetXml` / `exportWorkbook`) |
 | `app/profile.js` | 設定ファイルの解析 (`parseProfile`) と、設定に従ったカード組み立て (`buildProfileCards`)、条件による振り分け |
 | `app/zip.js` | ZIP 読み書き。`DecompressionStream` / `CompressionStream` を使用。未変更エントリは圧縮データをそのままコピー |
 | `app/store.js` | IndexedDB (`sessions`: 入力中の作業、`profiles`: 取り込んだ設定ファイル) |
@@ -58,6 +62,7 @@ iPad の Safari から Excel の点検表 (.xlsx / .xlsm) を読み込み、設�
   倍率は CSS 変数 (`--kp-h` / `--kp-w` / `--kp-f`)、端末の localStorage に縦向き・横向き別に記憶。つまみのダブルタップで標準に戻す。
   狭い画面 (iPhone 縦など) はテンキーが横幅いっぱいなので横幅のつまみは出さない
   つまみは小さめでつかみにくいが、入力中の誤操作を避けるため大きくしない (利用者の判断)
+  画面下のお知らせ (toast) は `pointer-events: none`。テンキーの上に出るため、つまみに重なってドラッグできなかった
 - 狭い画面 (幅 600px 以下 = iPhone など) は入力できる範囲を広げる (利用者の指定): 絞り込みの行 (すべて/未入力/管理値外/未入力へ) と
   区分の見出しを出さない (列分けの OS/DS などの見出しは区別に必要なので残す)。テンキーの戻る・進む・閉じるは「▲」「▼」「×」だけ、
   項目名と前回値は 1 行にしてテンキーの高さを詰める。iPad (広い画面) の表示は変えない

@@ -1,9 +1,10 @@
 // オフライン用: アプリ本体をキャッシュし、キャッシュ優先で返す。
 // アプリを更新したら VERSION を上げること。
-const VERSION = 'v31';
+const VERSION = 'v32';
 const CACHE = `inspection-cards-${VERSION}`;
 const FILES = [
   './', './index.html', './style.css', './app.js', './xlsx.js', './zip.js', './store.js', './profile.js', './formula.js',
+  './dom.js', './keypad.js', './update.js',
   './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png',
 ];
 

@@ -1,10 +1,11 @@
 // 点検表ごとの「設定ファイル」(JSON) に従ってカードを組み立てる。
 // 点検表に固有の名前・行・見出しは設定ファイル側だけに書き、このコードには持たない。
-import { colNum, colName, parseRef, displayValue, shiftFormula } from './xlsx.js';
+import { colNum, colName, parseRef, displayValue, shiftFormula, baseCard } from './xlsx.js';
 
 export const PROFILE_TYPE = 'inspection-cards-profile';
 
-const norm = (s) => String(s ?? '').normalize('NFKC').replace(/\s+/g, '').trim();
+/** 文字列の比較用 (全角・半角をそろえ、空白を除く) */
+export const norm = (s) => String(s ?? '').normalize('NFKC').replace(/\s+/g, '').trim();
 const text = (cell) => (cell && !cell.empty ? displayValue(cell).trim() : '');
 const num = (s) => {
   const n = String(s ?? '').normalize('NFKC').replace(/,/g, '').trim();
@@ -106,18 +107,8 @@ export function buildProfileCards(sheet, profile, targetCol) {
   const prevCols = recordCols.filter((c) => c < targetCol);
   const prevCol = prevCols.length ? prevCols[prevCols.length - 1] : null;
 
-  const base = (r) => {
-    const cur = sheet.get(r, targetCol);
-    const prev = prevCol ? sheet.get(r, prevCol) : null;
-    return {
-      row: r,
-      ref: colName(targetCol) + r,
-      locked: !!(cur && !cur.empty),
-      existing: cur && !cur.empty ? displayValue(cur) : '',
-      prev: prev && !prev.empty ? displayValue(prev) : '',
-      style: (prev && prev.s) || (cur && cur.s) || 0,
-    };
-  };
+  const base = (r) => baseCard(sheet, r, targetCol, prevCol);
+  const dateRow = metaRows.find((m) => m.type === 'date')?.row; // 過去のメモに日付を添えるため
 
   const meta = metaRows.map((m) => ({
     ...base(m.row), kind: 'meta', label: m.label.replace(/[:：]\s*$/, ''), type: m.type, chips: [],
@@ -166,7 +157,6 @@ export function buildProfileCards(sheet, profile, targetCol) {
     for (const col of [...prevCols].reverse()) {
       const t = sheet.comment?.(r, col);
       if (t) {
-        const dateRow = metaRows.find((m) => m.type === 'date')?.row;
         lastMemo = { text: t, prev: col === prevCol, date: dateRow ? text(sheet.get(dateRow, col)) : '' };
         break;
       }

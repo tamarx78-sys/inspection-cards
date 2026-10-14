@@ -75,6 +75,7 @@ async function showHome() {
                 `${s.sheetName} / ${colName(s.targetCol)}列 · ${filled}件入力 · ${new Date(s.updatedAt).toLocaleString('ja-JP')}`,
                 s.exportedAt ? el('span', { class: 'badge ok' }, '書き出し済') : null),
             ),
+            s.bytes ? el('button', { class: 'btn ghost', onclick: () => showOriginal(s) }, '元のファイル') : null,
             el('button', {
               class: 'btn ghost danger',
               onclick: async () => {
@@ -773,38 +774,13 @@ async function showExport() {
     toast(e.message, 'error');
     return;
   }
-  // 書き込み済みファイルを 1 つだけ、元と同じ名前で出す (元のファイルはそのまま残るのでバックアップは出さない)。
-  // iPad・iPhone の「ファイル」は同じ名前を置き換えず「 2」「 3」と番号を付けて保存する。古いものは利用者が消す
-  const name = session.fileName;
-  const type = /\.xlsm$/i.test(name) ? 'application/vnd.ms-excel.sheet.macroEnabled.12' : result.blob.type;
-  const file = new File([result.blob], name, { type });
-  const files = [file];
-
+  // 書き込み済みファイルを 1 つだけ、元と同じ名前で出す。同じ名前があると、保存先によって「置き換え」を聞かれるときと
+  // 番号 (「 2」) が付くときがある。置き換えても読み込み時点の元ファイルは「作業中の点検表」から取り出せる
+  const file = excelFile(result.blob, session.fileName);
   const markDone = async () => {
     session.exportedAt = Date.now();
     await putSession(session);
   };
-  const download = async () => {
-    const url = URL.createObjectURL(file);
-    const a = el('a', { href: url, download: name });
-    document.body.append(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 10000);
-    await markDone();
-    close();
-  };
-  const share = async () => {
-    try {
-      await navigator.share({ files });
-      await markDone();
-      close();
-    } catch (e) {
-      if (e.name !== 'AbortError') toast(`共有できませんでした: ${e.message}`, 'error');
-    }
-  };
-  const canShare = !!navigator.canShare?.({ files });
-  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   const where = (c) => `${c.section ? `${c.section} / ` : ''}${c.label}${c.sub ? ` ${c.sub}` : ''}`;
 
   const dlg = el('div', { class: 'modal-bg' },
@@ -818,16 +794,73 @@ async function showExport() {
         el('p', { class: 'error' }, `管理値外が ${ng.length} 件あります:`),
         el('ul', {}, ng.map((c) => el('li', {}, `${where(c)}: ${session.values[c.row]}${c.rangeText ? ` (管理 ${c.rangeText})` : c.setText ? ` (設定 ${c.setText})` : ''}`)))) : null,
       el('div', { class: 'files' },
-        el('div', {}, el('span', { class: 'badge ok' }, '記入済'), ' ', name)),
-      el('p', { class: 'hint' }, '同じ名前のファイルがあると、末尾に番号が付いて保存されます (元のファイルは変更されずに残ります)。次回は番号のいちばん大きいファイルを開いてください。'),
+        el('div', {}, el('span', { class: 'badge ok' }, '記入済'), ' ', file.name)),
+      el('p', { class: 'hint' }, '同じ名前のファイルがあるときは、保存先によって「置き換え」を聞かれるか、末尾に「 2」などの番号が付いて保存されます。'
+        + '置き換えても、読み込んだ時点の元のファイルはホームの「作業中の点検表」の「元のファイル」から保存し直せます (作業を削除するまで)。'
+        + '番号が付いたときは、次回は番号のいちばん大きいファイルを開いてください。'),
       el('div', { class: 'modal-actions' },
-        canShare && isIOS ? el('button', { class: 'btn primary big', onclick: share }, '共有 / 「ファイル」に保存') : null,
-        el('button', { class: `btn ${canShare && isIOS ? '' : 'primary'} big`, onclick: download }, 'ダウンロード'),
+        saveButtons(file, async () => { await markDone(); close(); }),
         el('button', { class: 'btn ghost', onclick: () => close() }, 'キャンセル'),
       ),
     ),
   );
   const close = () => dlg.remove();
+  document.body.append(dlg);
+}
+
+// ---------------- ファイルの保存 ----------------
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+/** Excel のファイルを作る (.xlsm はマクロ付きの MIME タイプ) */
+function excelFile(data, name) {
+  const type = /\.xlsm$/i.test(name) ? 'application/vnd.ms-excel.sheet.macroEnabled.12'
+    : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  return new File([data], name, { type });
+}
+
+/** 「共有 / ファイルに保存」(iPad・iPhone) と「ダウンロード」のボタン。保存したら onSaved */
+function saveButtons(file, onSaved) {
+  const download = async () => {
+    const url = URL.createObjectURL(file);
+    const a = el('a', { href: url, download: file.name });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    await onSaved();
+  };
+  const share = async () => {
+    try {
+      await navigator.share({ files: [file] });
+      await onSaved();
+    } catch (e) {
+      if (e.name !== 'AbortError') toast(`共有できませんでした: ${e.message}`, 'error');
+    }
+  };
+  const canShare = isIOS && !!navigator.canShare?.({ files: [file] });
+  return [
+    canShare ? el('button', { class: 'btn primary big', onclick: share }, '共有 / 「ファイル」に保存') : null,
+    el('button', { class: `btn ${canShare ? '' : 'primary'} big`, onclick: download }, 'ダウンロード'),
+  ];
+}
+
+/** 読み込んだ時点の元のファイルを保存し直す (書き出しで置き換えた後に元へ戻すため) */
+function showOriginal(s) {
+  const m = /^(.*?)(\.[^.]+)?$/.exec(s.fileName);
+  const file = excelFile(s.bytes, `${m[1]}_読み込み時${m[2] || '.xlsx'}`);
+  const close = () => dlg.remove();
+  const dlg = el('div', { class: 'modal-bg' },
+    el('div', { class: 'modal' },
+      el('h2', {}, '元のファイルを保存'),
+      el('p', {}, `「${s.fileName}」を読み込んだ時点の内容 (この作業の入力を書き込む前) を保存します。`),
+      el('div', { class: 'files' }, el('div', {}, el('span', { class: 'badge' }, '元の状態'), ' ', file.name)),
+      el('p', { class: 'hint' }, '元に戻すときは、保存したファイルの名前から「_読み込み時」を消してください。'),
+      el('div', { class: 'modal-actions' },
+        saveButtons(file, async () => close()),
+        el('button', { class: 'btn ghost', onclick: () => close() }, 'キャンセル'),
+      ),
+    ),
+  );
   document.body.append(dlg);
 }
 

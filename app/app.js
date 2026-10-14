@@ -1060,7 +1060,7 @@ const keypad = (() => {
 })();
 
 // ---------------- 文字サイズ・画面の向き ----------------
-const SIZES = [['', '標準'], ['l', '大'], ['xl', '特大']];
+const SIZES = [['', '標準'], ['l', '大'], ['xl', '特大'], ['s', '小']]; // 押すたびに 標準 → 大 → 特大 → 小 → 標準
 function applySize(key) {
   if (key) document.documentElement.dataset.size = key;
   else delete document.documentElement.dataset.size;

@@ -773,32 +773,27 @@ async function showExport() {
     toast(e.message, 'error');
     return;
   }
-  // 書き込み済みファイルは元と同じ名前、読み込み時点の元ファイルは _backup_日時 を付けて一緒に出す。
-  // (Safari からは元ファイルを直接上書きできないため、保存時に「置き換え」てもらう)
+  // 書き込み済みファイルを 1 つだけ、元の名前_記入済_日時 で出す (元のファイルはそのまま残るのでバックアップは出さない)。
+  // iPad・iPhone の「ファイル」は同じ名前を置き換えず番号を付けるため、日時で名前を分ける
   const d = new Date();
   const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}`;
-  const name = session.fileName;
-  const m = /^(.*?)(\.[^.]+)?$/.exec(name);
-  const backupName = `${m[1]}_backup_${stamp}${m[2] || '.xlsx'}`;
+  const m = /^(.*?)(\.[^.]+)?$/.exec(session.fileName);
+  const name = `${baseName(m[1])}_記入済_${stamp}${m[2] || '.xlsx'}`;
   const type = /\.xlsm$/i.test(name) ? 'application/vnd.ms-excel.sheet.macroEnabled.12' : result.blob.type;
   const file = new File([result.blob], name, { type });
-  const backup = new File([session.bytes], backupName, { type });
-  const files = [file, backup];
+  const files = [file];
 
   const markDone = async () => {
     session.exportedAt = Date.now();
     await putSession(session);
   };
   const download = async () => {
-    for (const f of files) {
-      const url = URL.createObjectURL(f);
-      const a = el('a', { href: url, download: f.name });
-      document.body.append(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 10000);
-      await new Promise((r) => setTimeout(r, 300));
-    }
+    const url = URL.createObjectURL(file);
+    const a = el('a', { href: url, download: name });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
     await markDone();
     close();
   };
@@ -826,9 +821,8 @@ async function showExport() {
         el('p', { class: 'error' }, `管理値外が ${ng.length} 件あります:`),
         el('ul', {}, ng.map((c) => el('li', {}, `${where(c)}: ${session.values[c.row]}${c.rangeText ? ` (管理 ${c.rangeText})` : c.setText ? ` (設定 ${c.setText})` : ''}`)))) : null,
       el('div', { class: 'files' },
-        el('div', {}, el('span', { class: 'badge ok' }, '記入済'), ' ', name),
-        el('div', {}, el('span', { class: 'badge' }, '元の状態'), ' ', backupName)),
-      el('p', { class: 'hint' }, '元のファイルと同じフォルダに保存し、同じ名前のファイルは「置き換え」てください。元の状態は backup のファイルに残ります。'),
+        el('div', {}, el('span', { class: 'badge ok' }, '記入済'), ' ', name)),
+      el('p', { class: 'hint' }, '元のファイルは変更されずに残ります。次回はこの記入済のファイルを開いて続きを入力してください。'),
       el('div', { class: 'modal-actions' },
         canShare && isIOS ? el('button', { class: 'btn primary big', onclick: share }, '共有 / 「ファイル」に保存') : null,
         el('button', { class: `btn ${canShare && isIOS ? '' : 'primary'} big`, onclick: download }, 'ダウンロード'),
@@ -838,6 +832,16 @@ async function showExport() {
   );
   const close = () => dlg.remove();
   document.body.append(dlg);
+}
+
+// 書き出し名の元になる名前。保存時に付いた番号 (「 2」) と、前回の書き出しの「_記入済_日時」(後ろの「 (1)」なども) を外す
+function baseName(stem) {
+  let s = stem;
+  for (let prev = ''; prev !== s;) {
+    prev = s;
+    s = s.replace(/\s+\d+$/, '').replace(/_(?:記入済|backup)_\d{8}_\d{4}(?:\s*\(\d+\)|-\d+)?$/, '');
+  }
+  return s || stem;
 }
 
 // ---------------- 文字サイズ・画面の向き ----------------

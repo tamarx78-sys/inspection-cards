@@ -3,7 +3,6 @@
 // 罫線・結合・書式・その他の要素は元のまま残る。
 import { readZip, writeZip } from './zip.js';
 
-const NS_MAIN = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
 const NS_REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 
 export const colName = (c) => {
@@ -343,7 +342,24 @@ export function detectLayout(sheet) {
   };
 }
 
-/** レイアウトと対象列から、カード定義を作る */
+/**
+ * カードの共通部分 (書き込む行・セル番地・記入済みか・前回値・書式)。設定あり・なしの両方で使う。
+ * 書式は前回の列の同じ行からコピーする (なければ書き込み先のセルの書式)
+ */
+export function baseCard(sheet, r, targetCol, prevCol) {
+  const cur = sheet.get(r, targetCol);
+  const prev = prevCol ? sheet.get(r, prevCol) : null;
+  return {
+    row: r,
+    ref: colName(targetCol) + r,
+    locked: !!(cur && !cur.empty),
+    existing: cur && !cur.empty ? displayValue(cur) : '',
+    prev: prev && !prev.empty ? displayValue(prev) : '',
+    style: (prev && prev.s) || (cur && cur.s) || 0,
+  };
+}
+
+/** レイアウトと対象列から、カード定義を作る (設定ファイルなしの自動判定) */
 export function buildCards(sheet, layout, targetCol) {
   const prevCols = layout.recordCols.filter((c) => c < targetCol);
   const prevCol = prevCols.length ? prevCols[prevCols.length - 1] : null;
@@ -356,19 +372,7 @@ export function buildCards(sheet, layout, targetCol) {
     if (typeof cell.value === 'number') return cell.fmt || 'number';
     return 'text';
   };
-  const mk = (r, base) => {
-    const cur = sheet.get(r, targetCol);
-    const prev = prevCol ? sheet.get(r, prevCol) : null;
-    return {
-      ...base,
-      row: r,
-      ref: colName(targetCol) + r,
-      locked: !!(cur && !cur.empty),
-      existing: cur && !cur.empty ? displayValue(cur) : '',
-      prev: prev && !prev.empty ? displayValue(prev) : '',
-      style: (prev && prev.s) || (cur && cur.s) || 0,
-    };
-  };
+  const mk = (r, extra) => ({ ...extra, ...baseCard(sheet, r, targetCol, prevCol) });
 
   const meta = layout.metaRows.map((m) => mk(m.row, {
     kind: 'meta', label: m.label, type: m.type === 'text' && /名前|氏名|点検者|担当/.test(m.label) ? 'name' : m.type, chips: [],
@@ -399,7 +403,10 @@ export function buildCards(sheet, layout, targetCol) {
       cond: {},
     });
   });
-  return { meta, items, conditions: [], warnings: [], prevCol, targetCol, ngMessage: '管理値外' };
+  return {
+    meta, items, conditions: [], warnings: [], recordCols: layout.recordCols, prevCol, targetCol,
+    nextCol: layout.targetCol, ngMessage: '管理値外',
+  };
 }
 
 // ---- 書き戻し ----

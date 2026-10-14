@@ -72,12 +72,11 @@ export function evaluate(formula, get) {
       return fn(xs);
     }
     if (t.v === '(') { const v = expr(); take(')'); return v; }
-    if (t.v === '-') return -unary();
-    if (t.v === '+') return unary();
+    if (t.v === '-') return -primary();
+    if (t.v === '+') return primary();
     throw new Error('式の形が正しくありません');
   }
-  function unary() { return primary(); }
-  function power() { let v = unary(); while (peek()?.v === '^') { take(); v **= unary(); } return v; }
+  function power() { let v = primary(); while (peek()?.v === '^') { take(); v **= primary(); } return v; }
   function term() {
     let v = power();
     while (peek()?.v === '*' || peek()?.v === '/') { const op = take().v; const w = power(); v = op === '*' ? v * w : v / w; }

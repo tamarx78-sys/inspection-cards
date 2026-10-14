@@ -2,46 +2,34 @@ import {
   openWorkbook, loadSheet, detectLayout, buildCards, exportWorkbook, toCellValue, colName, displayValue,
 } from './xlsx.js';
 import {
-  parseProfile, profileMatches, profileSheets, buildProfileCards, conditionValues, isApplicable,
+  parseProfile, profileMatches, profileSheets, buildProfileCards, conditionValues, isApplicable, norm,
 } from './profile.js';
 import {
   putSession, getSession, deleteSession, listSessions, requestPersist, putProfile, deleteProfile, listProfiles,
 } from './store.js';
 import { evaluate } from './formula.js';
+import { $, el, add, toast } from './dom.js';
+import { createKeypad } from './keypad.js';
+import { initUpdateCheck } from './update.js';
 
-const $ = (sel, root = document) => root.querySelector(sel);
 const main = $('#main');
-const el = (tag, attrs = {}, ...children) => {
-  const e = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs)) {
-    if (v === undefined || v === null || v === false) continue;
-    if (k === 'class') e.className = v;
-    else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
-    else if (k === 'dataset') Object.assign(e.dataset, v);
-    else e.setAttribute(k, v === true ? '' : v);
-  }
-  return add(e, children);
-};
-/** 配列をネストごと展開し、null/false を飛ばして追加する */
-const add = (parent, children) => {
-  for (const c of [children].flat(Infinity)) if (c !== null && c !== undefined && c !== false) parent.append(c);
-  return parent;
-};
 const mount = (...children) => { keypad.hide(); main.replaceChildren(); add(main, children); };
 const pad = (n) => String(n).padStart(2, '0');
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 const nowTime = () => { const d = new Date(); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
-const norm = (s) => String(s ?? '').normalize('NFKC').replace(/\s+/g, '').trim();
 
 // 現在の作業状態
 let S = null; // { session, wb, sheet, cards, filter }
 
-function toast(msg, kind = '') {
-  const t = el('div', { class: `toast ${kind}` }, msg);
-  document.body.append(t);
-  setTimeout(() => t.classList.add('show'), 10);
-  setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); }, 2600);
-}
+// テンキー (数値欄の入力)。確定・移動・絞り込みは画面側の処理を使う
+const keypad = createKeypad({
+  onType: (row) => beginEditing(row),
+  onCommit: () => endEditing(),
+  onMove: (card, back) => focusNext(card, { back }),
+  onActivate: (input) => activateInput(input),
+  onLeave: () => applyFilterLater(),
+  prevText: (card) => prevText(card),
+});
 
 function setHeader(title, actions = []) {
   $('#title').textContent = title;
@@ -187,7 +175,8 @@ async function showSetup({ fileName, bytes, wb, profiles }) {
   }
   const colSel = el('select', { class: 'field' });
   const info = el('div', { class: 'setup-info' });
-  const startBtn = el('button', { class: 'btn primary big' }, '入力をはじめる');
+  // 表の確認 (refresh) が終わるまでは押せない (準備中に押されると、選んだシートがないまま始まってしまうため)
+  const startBtn = el('button', { class: 'btn primary big', disabled: true }, '入力をはじめる');
   let current = null; // { profile, sheetName, sheet, cards }
 
   const excelHint = 'アプリでは入力できないので、この点検表は Excel で入力してください (設定ファイルの更新が必要です)。';
@@ -263,6 +252,7 @@ async function showSetup({ fileName, bytes, wb, profiles }) {
   profileSel.addEventListener('change', async () => { await fillSheets(); refresh(); });
   sheetSel.addEventListener('change', refresh);
   startBtn.addEventListener('click', async () => {
+    if (!current) return;
     const targetCol = +colSel.value;
     const { profile, sheetName } = current;
     if (profile && sheetCheck?.candidates.length > 1) {
@@ -332,7 +322,10 @@ async function resume(id) {
 let saveTimer = null;
 function scheduleSave() {
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => putSession(S.session).catch((e) => toast(`保存失敗: ${e.message}`, 'error')), 300);
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    putSession(S.session).catch((e) => toast(`保存失敗: ${e.message}`, 'error'));
+  }, 300);
 }
 // ページを離れる/バックグラウンドに回る前に確実に保存
 const flushSave = () => { if (S && saveTimer) { clearTimeout(saveTimer); saveTimer = null; putSession(S.session); } };
@@ -394,8 +387,9 @@ function targetCards() {
   return [...S.cards.meta, ...S.cards.items].filter((c) => !c.locked && applicable(c));
 }
 /** 入力が必要なカード (任意入力を除く)。進み具合と未入力の数え方に使う */
-const requiredCards = () => targetCards().filter((c) => !c.optional && c.type !== 'formula');
-const isEmptyRequired = (c) => !c.optional && c.type !== 'formula' && judge(c, S.session.values[c.row]).state === 'empty';
+const isRequired = (c) => !c.optional && c.type !== 'formula'; // 任意入力・自動計算は入力不要
+const requiredCards = () => targetCards().filter(isRequired);
+const isEmptyRequired = (c) => isRequired(c) && judge(c, S.session.values[c.row]).state === 'empty';
 
 /** 自動計算の行を、今の入力値から計算し直す (計算できなければ空) */
 function recalcFormulas() {
@@ -467,7 +461,7 @@ function setValue(card, value, { fromPrev = false } = {}) {
   if (fromPrev) session.fromPrev[card.row] = true;
   else delete session.fromPrev[card.row];
   delete session.auto[card.row];
-  if (card.type === 'name') localStorage.setItem('lastName', value);
+  if (card.type === 'name') { try { localStorage.setItem('lastName', value); } catch {} }
   if (editingRow !== card.row) recalcFormulas(); // 入力中は確定してから計算する
   scheduleSave();
   if (card.conditionSource) applyFilter(); // 条件の元になる項目が変わると、対象の行が変わる
@@ -846,222 +840,9 @@ async function showExport() {
   document.body.append(dlg);
 }
 
-// ---------------- テンキー ----------------
-// iPad の Safari は inputmode="decimal" でもテンキーにならない (通常のキーボードの数字段が出るだけ) ため、
-// 数値入力欄 (data-keypad) では画面下にアプリのテンキーを出す。
-// 数値欄にはフォーカスを当てず (readonly)、入力中の欄 (target) はここで管理する。
-// iPad ではフォーカス時の自動スクロールや、なめらかなスクロールの最中のタップが効かなくなるため。
-// 閉じるのは「閉じる」・ほかの入力欄へ移ったとき・選択式を押したとき・数値欄でない項目へ移ったときだけ。
-const keypad = (() => {
-  let target = null;
-  let fresh = false; // 入力中の欄に移った直後。最初のキーで値を置き換える (打ち直しやすくするため)
-  const label = el('div', { class: 'keypad-label' });
-  const setValue = (v) => {
-    fresh = false;
-    beginEditing(target.closest('.card')?._card?.row ?? null);
-    target.classList.remove('keypad-fresh');
-    target.value = v;
-    target.dispatchEvent(new Event('input', { bubbles: true }));
-  };
-  const actions = {
-    back: () => setValue(fresh ? '' : target.value.slice(0, -1)),
-    // Enter と同じ (空欄なら前回値で確定して次へ)
-    enter: () => target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })),
-    // 戻る / 進む: 値には触れずに前後の項目へ移るだけ
-    prev: () => { const card = target.closest('.card')?._card; if (card) focusNext(card, { back: true }); },
-    next: () => { const card = target.closest('.card')?._card; if (card) focusNext(card); },
-    close: () => hide(),
-  };
-  const press = (act) => {
-    if (!target) return;
-    // 入力欄が消えた・隠れた (絞り込みなど) ときは閉じる
-    if (!target.isConnected || target.closest('.card')?.hidden) { hide(); return; }
-    if (['enter', 'prev', 'next', 'close'].includes(act)) endEditing(); // 確定 (移れなかったときも判定を出す)
-    if (actions[act]) actions[act]();
-    else setValue((fresh ? '' : target.value) + act);
-  };
-  const key = (text, act, cls = '') => el('button', { type: 'button', class: `key ${cls}`, dataset: { act } }, text);
-  // 大きさを変えるつまみ: 上端で高さ、テンキー部分の左端で横幅
-  const hGrip = el('div', { class: 'keypad-hgrip', title: '上下にドラッグで高さを変更 (ダブルタップで元に戻す)' });
-  const wGrip = el('div', { class: 'keypad-wgrip', title: '左右にドラッグで横幅を変更 (ダブルタップで元に戻す)' });
-  const pad = el('div', { class: 'keypad', hidden: true },
-    hGrip,
-    el('div', { class: 'keypad-side' }, label,
-      // 狭い画面 (iPhone) では記号だけにして高さを詰める (k-label を CSS で隠す)
-      el('div', { class: 'keypad-nav' },
-        key([el('span', {}, '▲'), el('span', { class: 'k-label' }, ' 戻る')], 'prev', 'nav'),
-        key([el('span', {}, '▼'), el('span', { class: 'k-label' }, ' 進む')], 'next', 'nav')),
-      key([el('span', { class: 'k-narrow' }, '×'), el('span', { class: 'k-label' }, '閉じる')], 'close', 'close')),
-    wGrip,
-    el('div', { class: 'keypad-keys' },
-      key('7', '7'), key('8', '8'), key('9', '9'), key('-', '-'),
-      key('4', '4'), key('5', '5'), key('6', '6'), key('BS', 'back', 'fn'),
-      key('1', '1'), key('2', '2'), key('3', '3'), key('Enter', 'enter', 'next'),
-      key('0', '0', 'zero'), key('.', '.')));
-  // pointerdown で処理し既定動作を止める (ほかの要素にフォーカスを移さない・反応を速くするため)
-  let swallowUntil = 0;
-  pad.addEventListener('pointerdown', (e) => {
-    e.preventDefault();
-    const act = e.target.closest('.key')?.dataset.act;
-    if (act) press(act);
-    // キーでテンキーが閉じたら、続く click が下の数値欄に届いて開き直さないよう、少しの間 click を無視する
-    if (pad.hidden) swallowUntil = Date.now() + 400;
-  });
-  document.body.append(pad);
-
-  // ---- 大きさの調整 (端末ごと・縦向き/横向きごとに記憶。最小は標準の大きさ) ----
-  const sizeKey = () => `keypadSize:${window.innerWidth > window.innerHeight ? 'landscape' : 'portrait'}`;
-  let size = { h: 1, w: 1 }; // 記憶している倍率
-  const applied = { h: 1, w: 1 }; // 今かかっている倍率 (画面に収まるよう size を抑えたもの)
-  const rem = () => parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
-  const BASE_KEY_H = 3.25; // rem (CSS の .key と同じ)
-  const BASE_KEYS_W = 22; // rem (CSS の .keypad-keys と同じ)
-  const SIDE_MIN = 11; // rem: 左側 (戻る・進むなど) に最低限残す幅
-  /** 今の画面で取れる最大の倍率 */
-  function limits() {
-    const r = rem();
-    const cs = getComputedStyle(pad);
-    const innerW = pad.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
-    const fixedW = wGrip.offsetWidth + 2 * (parseFloat(cs.columnGap) || 0);
-    const maxW = Math.max(1, (innerW - fixedW - SIDE_MIN * r) / (BASE_KEYS_W * r));
-    // 高さ: テンキー全体が画面の半分を超えない。倍率 1 のときの高さから、キー 4 段ぶんの伸びで割る
-    const step = 4 * BASE_KEY_H * r; // 倍率が 1 増えたときの高さの増え方
-    const baseH = pad.offsetHeight - step * (applied.h - 1);
-    const maxH = Math.max(1, 1 + (window.innerHeight * 0.5 - baseH) / step);
-    return { maxW, maxH };
-  }
-  function applySize({ save = false } = {}) {
-    const { maxW, maxH } = limits();
-    const h = Math.min(Math.max(size.h, 1), maxH);
-    const w = Math.min(Math.max(size.w, 1), maxW);
-    applied.h = h; applied.w = w;
-    pad.style.setProperty('--kp-h', h.toFixed(3));
-    pad.style.setProperty('--kp-w', w.toFixed(3));
-    pad.style.setProperty('--kp-f', Math.min(h, w).toFixed(3)); // 文字はキーの短い辺に合わせる
-    pad.classList.toggle('keypad-narrow-side', w > 1 && (maxW - w) * BASE_KEYS_W < 4); // 左側が狭いときは縦に並べる
-    if (save) { try { localStorage.setItem(sizeKey(), JSON.stringify(size)); } catch {} }
-    if (!pad.hidden) {
-      document.documentElement.style.setProperty('--keypad-h', `${pad.offsetHeight}px`);
-    }
-  }
-  function loadSize() {
-    try { size = { h: 1, w: 1, ...JSON.parse(localStorage.getItem(sizeKey()) || '{}') }; } catch { size = { h: 1, w: 1 }; }
-  }
-  /** つまみのドラッグ。axis: 'h' (上下) / 'w' (左右)。ダブルタップで標準に戻す */
-  function dragGrip(grip, axis) {
-    let start = null;
-    let lastTap = 0;
-    grip.addEventListener('pointerdown', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (Date.now() - lastTap < 350) { size[axis] = 1; applySize({ save: true }); reveal(); lastTap = 0; return; }
-      lastTap = Date.now();
-      grip.setPointerCapture(e.pointerId);
-      start = { x: e.clientX, y: e.clientY, v: Math.min(size[axis], axis === 'h' ? limits().maxH : limits().maxW) };
-      grip.classList.add('dragging');
-    });
-    grip.addEventListener('pointermove', (e) => {
-      if (!start) return;
-      const r = rem();
-      // 上へ・左へ動かすと大きくなる
-      const d = axis === 'h' ? (start.y - e.clientY) / (4 * BASE_KEY_H * r) : (start.x - e.clientX) / (BASE_KEYS_W * r);
-      if (Math.abs(d) > 0.02) lastTap = 0; // 動かしたらダブルタップとみなさない
-      const { maxW, maxH } = limits();
-      size[axis] = Math.min(Math.max(start.v + d, 1), axis === 'h' ? maxH : maxW);
-      applySize();
-    });
-    const end = () => {
-      if (!start) return;
-      start = null;
-      grip.classList.remove('dragging');
-      applySize({ save: true });
-      reveal();
-    };
-    grip.addEventListener('pointerup', end);
-    grip.addEventListener('pointercancel', end);
-  }
-  dragGrip(hGrip, 'h');
-  dragGrip(wGrip, 'w');
-  loadSize();
-
-  /** 入力中の項目がテンキーに隠れていれば、見える位置まで一瞬でずらす */
-  function reveal() {
-    if (!target) return;
-    const r = (target.closest('.card') || target).getBoundingClientRect();
-    const limit = window.innerHeight - pad.offsetHeight - 12;
-    const top = (document.querySelector('.toolbar')?.getBoundingClientRect().bottom ?? 0) + 8;
-    if (r.bottom > limit) window.scrollBy(0, r.bottom - limit);
-    else if (r.top < top) window.scrollBy(0, r.top - top);
-  }
-  function show(input) {
-    endEditing(); // 別の欄へ移る = 確定
-    if (target && target !== input) applyFilterLater(); // 入力を終えた欄の絞り込みを反映 (フォーカス外れの代わり)
-    target?.classList.remove('keypad-target', 'keypad-fresh');
-    target = input;
-    fresh = true;
-    shownCount++;
-    input.classList.add('keypad-target', 'keypad-fresh');
-    const card = input.closest('.card')?._card;
-    label.replaceChildren(
-      el('div', { class: 'keypad-title' }, card?.label ?? '', card?.split?.key ? ` ${card.split.key}` : '',
-        card?.sub && !card.hideSub ? el('span', { class: 'code' }, card.sub) : null,
-        card?.unit ? el('span', { class: 'code' }, `[${card.unit}]`) : null),
-      card?.prev ? el('div', { class: 'keypad-prev' }, `前回 ${prevText(card)}`) : null);
-    pad.hidden = false;
-    document.documentElement.classList.add('keypad-open');
-    applySize();
-  }
-  function hide() {
-    endEditing();
-    if (target) applyFilterLater();
-    target?.classList.remove('keypad-target', 'keypad-fresh');
-    target = null;
-    pad.hidden = true;
-    document.documentElement.classList.remove('keypad-open');
-  }
-  // 数値欄のタップ: フォーカスさせずにテンキーの対象にする (スクロールの指の動きでは反応しないよう click で)
-  document.addEventListener('pointerdown', (e) => { if (e.target.matches?.('input[data-keypad]')) e.preventDefault(); });
-  let shownCount = 0; // show() の回数。click の間に入力中の欄が変わったかを見る
-  let shownAtClick = 0;
-  document.addEventListener('click', (e) => {
-    shownAtClick = shownCount;
-    if (Date.now() < swallowUntil) { swallowUntil = 0; e.preventDefault(); e.stopPropagation(); }
-  }, true);
-  document.addEventListener('click', (e) => {
-    if (e.target.matches?.('input[data-keypad]')) { activateInput(e.target); reveal(); }
-    // 選択式を押したら閉じる。ただし選んだ結果、次の数値欄へ移ったときは閉じない
-    else if (target && e.target.closest?.('.choice') && shownCount === shownAtClick) hide();
-  });
-  // Tab キーなどでフォーカスが来たとき・ほかの入力欄へ移ったとき
-  document.addEventListener('focusin', (e) => {
-    if (e.target.matches?.('input[data-keypad]')) show(e.target);
-    else if (target && !pad.contains(e.target)) hide();
-  });
-  // 外付けキーボード
-  document.addEventListener('keydown', (e) => {
-    // e.isTrusted: テンキーの Enter が送る合成イベントは対象外 (拾うと次々に進んでしまう)
-    if (!target || !e.isTrusted || e.isComposing || e.metaKey || e.ctrlKey || e.altKey) return;
-    const a = document.activeElement;
-    if (a && a !== target && a !== document.body && a.matches('input, textarea, select')) return;
-    const map = { Backspace: 'back', Enter: 'enter', ArrowUp: 'prev', ArrowDown: 'next', Escape: 'close' };
-    const act = map[e.key] ?? (/^[0-9.-]$/.test(e.key) ? e.key : null);
-    if (!act || (act === 'enter' && e.target.matches?.('input[data-keypad]'))) return; // 数値欄自身の Enter は既存の処理に任せる
-    e.preventDefault();
-    press(act);
-  });
-  // 回転などで高さが変わったら、入力中の項目を見える位置に戻す
-  window.addEventListener('resize', () => {
-    loadSize(); // 縦向き・横向きで別々に記憶している
-    if (pad.hidden) return;
-    applySize();
-    target?.closest('.card')?.scrollIntoView({ block: 'center' });
-  });
-  return { show, hide, reveal, isOpen: () => !pad.hidden };
-})();
-
 // ---------------- 文字サイズ・画面の向き ----------------
 const SIZES = [['', '標準'], ['l', '大'], ['xl', '特大'], ['s', '小']]; // 押すたびに 標準 → 大 → 特大 → 小 → 標準
-function applySize(key) {
+function applyTextSize(key) {
   if (key) document.documentElement.dataset.size = key;
   else delete document.documentElement.dataset.size;
   try { localStorage.setItem('textSize', key); } catch {}
@@ -1072,10 +853,11 @@ $('#size').addEventListener('click', () => {
   const cur = document.documentElement.dataset.size || '';
   const i = SIZES.findIndex(([k]) => k === cur);
   const [key, label] = SIZES[(i + 1) % SIZES.length];
-  // 拡大後も、今見ているカードが画面内に残るようにする
-  const focused = document.activeElement?.closest?.('.card');
-  applySize(key);
+  // 拡大後も、入力中のカードが画面内に残るようにする (数値欄はフォーカスしないのでテンキーの対象も見る)
+  const focused = (keypad.target || document.activeElement)?.closest?.('.card');
+  applyTextSize(key);
   focused?.scrollIntoView({ block: 'center' });
+  if (keypad.isOpen()) keypad.reveal();
   toast(`文字サイズ: ${label}`);
 });
 
@@ -1085,7 +867,7 @@ function updateTopbarH() {
 }
 new ResizeObserver(updateTopbarH).observe($('.topbar'));
 window.addEventListener('resize', updateTopbarH);
-applySize(document.documentElement.dataset.size || '');
+applyTextSize(document.documentElement.dataset.size || '');
 
 // ---------------- 起動 ----------------
 function updateOnline() {
@@ -1096,69 +878,11 @@ window.addEventListener('offline', updateOnline);
 updateOnline();
 
 // ---------------- 版の確認 ----------------
-// 開いたとき・アプリに戻ってきたときに、オンラインなら新しい版がないか確認する。
-// 新しい版は Service Worker が裏で読み込み、すぐ有効になる (sw.js の skipWaiting)。
-// 画面は古いまま動いているので「再読み込み」を案内する (入力途中の内容は保存してから読み込み直す)。
-const versionLine = el('p', { class: 'hint version-line' });
-let swReg = null;
-let currentVersion = '';
-let lastCheck = 0;
-const setVersionStatus = (msg) => {
-  versionLine.textContent = `アプリの版: ${currentVersion || '不明'}${msg ? ` · ${msg}` : ''}`;
-};
-/** Service Worker に版を問い合わせる */
-function askVersion(sw) {
-  return new Promise((resolve) => {
-    if (!sw) { resolve(''); return; }
-    const ch = new MessageChannel();
-    ch.port1.onmessage = (e) => resolve(e.data?.version || '');
-    sw.postMessage('version', [ch.port2]);
-    setTimeout(() => resolve(''), 2000);
-  });
-}
-async function checkUpdate({ force = false } = {}) {
-  if (!swReg) return;
-  if (!navigator.onLine) { setVersionStatus('オフラインのため最新版か確認できません'); return; }
-  if (!force && Date.now() - lastCheck < 60 * 1000) return; // 連続して確認しない
-  lastCheck = Date.now();
-  setVersionStatus('最新版か確認中…');
-  try {
-    await swReg.update();
-  } catch {
-    setVersionStatus('最新版か確認できませんでした');
-    return;
-  }
-  if (swReg.installing || swReg.waiting) setVersionStatus('新しい版を読み込み中…');
-  else setVersionStatus('最新版です');
-}
-function showUpdateBanner(version) {
-  document.querySelector('.update-banner')?.remove();
-  const reload = () => { flushSave(); location.reload(); };
-  document.body.append(el('div', { class: 'update-banner' },
-    el('span', {}, `新しい版${version ? ` (${version})` : ''}を読み込みました。`,
-      S ? '入力内容は保存されます。' : ''),
-    el('button', { class: 'btn primary', onclick: reload }, '再読み込み')));
-}
+const { versionLine, checkUpdate } = initUpdateCheck({
+  beforeReload: () => flushSave(),
+  hasWork: () => !!S,
+});
 
-if ('serviceWorker' in navigator) {
-  const hadController = !!navigator.serviceWorker.controller; // 初回インストールでは案内しない
-  navigator.serviceWorker.addEventListener('controllerchange', async () => {
-    if (!hadController) return;
-    const v = await askVersion(navigator.serviceWorker.controller);
-    setVersionStatus(v && v !== currentVersion ? `新しい版 ${v} があります (再読み込みで切り替わります)` : '');
-    showUpdateBanner(v);
-  });
-  navigator.serviceWorker.register('./sw.js').then(async (reg) => {
-    swReg = reg;
-    const ready = await navigator.serviceWorker.ready;
-    currentVersion = await askVersion(navigator.serviceWorker.controller || ready.active);
-    setVersionStatus('');
-    checkUpdate({ force: true });
-  }).catch((e) => console.warn('SW 登録失敗', e));
-  // ホーム画面から戻ってきたとき (iPad では起動し直さずに再開することが多い)
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkUpdate(); });
-  window.addEventListener('online', () => checkUpdate());
-}
 if (typeof DecompressionStream === 'undefined') {
   mount(el('p', { class: 'error' }, 'このブラウザは対応していません (iPadOS 16.4 以降の Safari が必要です)'));
 } else {

@@ -91,6 +91,7 @@ input.field::-webkit-date-and-time-value { text-align: left; }
 .home h2 { font-size: 0.9375rem; color: var(--muted); margin: 16px 0 0; }
 .hint { color: var(--muted); font-size: 0.875rem; margin: 0; }
 .session-list { display: grid; gap: 10px; }
+.session-list > * { min-width: 0; } /* 長いファイル名で一覧が画面より広がらないように (名前は … で省略) */
 .session { display: flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 8px 8px 16px; }
 .session-main { flex: 1; min-width: 0; cursor: pointer; padding: 6px 0; }
 .session-name { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

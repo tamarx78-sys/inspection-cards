@@ -38,6 +38,7 @@
 * { box-sizing: border-box; }
 /* 文字サイズ: すべての文字・入力欄・カード幅が rem 基準なので、ここだけで全体が拡大する */
 html { -webkit-text-size-adjust: 100%; font-size: 16px; }
+html[data-size="s"] { font-size: 14px; }
 html[data-size="l"] { font-size: 19px; }
 html[data-size="xl"] { font-size: 23px; }
 body {
@@ -79,6 +80,14 @@ main { max-width: 1400px; margin: 0 auto; padding: 16px 16px calc(env(safe-area-
 .btn:active { transform: scale(.98); }
 
 .home { display: grid; gap: 16px; padding-top: 8px; }
+/* グリッドの中身が長くても (プルダウンの長い選択肢・長いファイル名など) 画面より広がらないようにする */
+.home > *, .setup > *, .lbl > *, .card > * { min-width: 0; }
+select.field { max-width: 100%; text-overflow: ellipsis; }
+/* iPhone の Safari は日付・時間の入力欄に独自の最小幅を持たせるため、カードからはみ出していた */
+input.field[type="date"], input.field[type="time"] {
+  -webkit-appearance: none; appearance: none; display: block; min-width: 0; max-width: 100%;
+}
+input.field::-webkit-date-and-time-value { text-align: left; }
 .home h2 { font-size: 0.9375rem; color: var(--muted); margin: 16px 0 0; }
 .hint { color: var(--muted); font-size: 0.875rem; margin: 0; }
 .session-list { display: grid; gap: 10px; }
@@ -90,7 +99,8 @@ main { max-width: 1400px; margin: 0 auto; padding: 16px 16px calc(env(safe-area-
 .setup { display: grid; gap: 16px; }
 .lbl { display: grid; gap: 6px; font-weight: 600; }
 .field {
-  font: inherit; font-size: 1.0625rem; color: var(--text); background: var(--surface);
+  /* 16px 未満だと iPhone の Safari がタップ時に画面を拡大するので、文字サイズ「小」でも 16px を下回らない */
+  font: inherit; font-size: max(16px, 1.0625rem); color: var(--text); background: var(--surface);
   border: 1.5px solid var(--line); border-radius: 10px; padding: 10px 12px; width: 100%; min-height: 3rem;
 }
 .field:focus, .field.keypad-target { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 25%, transparent); }

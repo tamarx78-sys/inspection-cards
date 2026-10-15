@@ -170,7 +170,7 @@ export function createKeypad(hooks) {
       el('div', { class: 'keypad-title' }, card?.label ?? '', card?.split?.key ? ` ${card.split.key}` : '',
         card?.sub && !card.hideSub ? el('span', { class: 'code' }, card.sub) : null,
         card?.unit ? el('span', { class: 'code' }, `[${card.unit}]`) : null),
-      card?.prev ? el('div', { class: 'keypad-prev' }, `前回 ${hooks.prevText(card)}`) : null);
+      card?.prev ? el('div', { class: 'keypad-prev' }, el('span', { class: 'prev-label' }, '前回'), el('span', { class: 'prev-value' }, hooks.prevText(card))) : null);
     panel.hidden = false;
     document.documentElement.classList.add('keypad-open');
     applyKeypadSize();

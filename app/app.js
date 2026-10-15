@@ -537,7 +537,7 @@ function cardChips(card) {
   if (!card.rangeKind && card.kindText && card.type !== 'choice' && !/[～~]/.test(card.kindText)) {
     chips.push(el('span', { class: 'chip' }, card.kindText));
   }
-  if (card.prev) chips.push(el('span', { class: 'chip prev' }, `前回 ${prevText(card)}`));
+  if (card.prev) chips.push(el('span', { class: 'chip prev' }, el('span', { class: 'prev-label' }, '前回'), el('span', { class: 'prev-value' }, prevText(card))));
   return el('div', { class: 'chips' }, chips);
 }
 

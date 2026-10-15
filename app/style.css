@@ -145,7 +145,9 @@ input.field::-webkit-date-and-time-value { text-align: left; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { font-size: 0.8125rem; background: var(--chip); border-radius: 99px; padding: 1px 10px; }
 .chip.range { font-weight: 700; }
-.chip.prev { color: var(--muted); background: transparent; border: 1px dashed var(--line); }
+.chip.prev { color: var(--muted); background: transparent; border: 1px dashed var(--line); display: inline-flex; align-items: baseline; gap: 6px; }
+/* 前回値はよく見るので、値だけ大きく濃く (「前回」の字は小さいまま) */
+.prev-value { color: var(--text); font-size: 1.125rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 .chip.where { background: transparent; border: 1px solid var(--line); }
 .chip.ref { color: var(--muted); }
 .watch { color: var(--ng); margin-right: 4px; }
@@ -249,7 +251,8 @@ input.field::-webkit-date-and-time-value { text-align: left; }
 }
 .keypad-side { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: space-between; gap: 8px; margin-right: 8px; }
 .keypad-title { font-weight: 700; font-size: 1.0625rem; overflow: hidden; text-overflow: ellipsis; }
-.keypad-prev { color: var(--muted); font-size: 0.875rem; font-variant-numeric: tabular-nums; }
+.keypad-prev { color: var(--muted); font-size: 0.875rem; display: flex; align-items: baseline; gap: 6px; }
+.keypad-prev .prev-value { font-size: 1.375rem; }
 .keypad-keys { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; width: min(100%, calc(22rem * var(--kp-w, 1))); flex-shrink: 0; }
 /* 大きさの倍率 (--kp-h 高さ / --kp-w 横幅 / --kp-f 文字) はドラッグで変える。最小は 1 (標準) */
 .keypad-keys .key { min-height: calc(3.25rem * var(--kp-h, 1)); font-size: calc(1.5rem * var(--kp-f, 1)); }
@@ -315,6 +318,7 @@ html.keypad-open .toast { bottom: calc(var(--keypad-h, 0px) + 12px); } /* 通知
   .keypad-label { min-width: 0; display: flex; align-items: baseline; gap: 8px; white-space: nowrap; overflow: hidden; }
   .keypad-title { font-size: 1rem; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   .keypad-prev { flex-shrink: 0; font-size: 0.8125rem; }
+  .keypad-prev .prev-value { font-size: 1.125rem; }
   .keypad { flex-direction: column; gap: 6px; padding-top: 16px; }
   .keypad-side { max-width: none; margin-right: 0; }
   .keypad-keys { width: 100%; }

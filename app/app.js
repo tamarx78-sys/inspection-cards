@@ -479,8 +479,9 @@ function renderInput(card, refresh) {
       for (const b of group.children) b.classList.toggle('on', norm(b.dataset.v) === cur);
     };
     for (const o of card.options) {
+      const off = card.disabledOptions?.some((d) => norm(d) === norm(o)); // 設定で選べないようにした選択肢
       group.append(el('button', {
-        class: `choice ${norm(o) === norm(card.prev) ? 'prev' : ''}`, dataset: { v: o }, type: 'button',
+        class: `choice ${norm(o) === norm(card.prev) ? 'prev' : ''}`, dataset: { v: o }, type: 'button', disabled: off,
         onclick: () => {
           const same = norm(S.session.values[card.row]) === norm(o);
           setValue(card, same ? '' : o);

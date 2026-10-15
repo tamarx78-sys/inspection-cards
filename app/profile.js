@@ -114,11 +114,11 @@ export function buildProfileCards(sheet, profile, targetCol) {
     ...base(m.row), kind: 'meta', label: m.label.replace(/[:：]\s*$/, ''), type: m.type, chips: [],
   }));
 
-  // 行を特定するキー (設定の items.keyCol の値) → 行
+  // 行を特定するキー (設定の items.keyCol の値) → 行。同じキーの行や、キーが空の行もある (項目名で区別する)
   const byKey = new Map();
   for (const r of rows) {
-    const k = text(sheet.get(r, keyCol));
-    if (k) byKey.set(norm(k), r);
+    const k = norm(text(sheet.get(r, keyCol)));
+    byKey.set(k, [...(byKey.get(k) || []), r]);
   }
   let lastSection = '';
   let lastName = '';
@@ -206,11 +206,15 @@ export function buildProfileCards(sheet, profile, targetCol) {
   // 設定に控えてある行番号 (_row) と実際の行が違う = 行が増減した。キーと項目名が合えば使うが、
   // 行番号で書いた式 (formula) などがずれるおそれがあるので知らせる
   const moved = new Map();
+  const nameOk = (card, name) => !name || norm(card.label + card.sub).includes(norm(name)) || norm(card.label) === norm(name);
   const resolve = (ref, what) => {
-    const r = byKey.get(norm(ref.no));
-    if (!r) { warnings.push(`${what}: キー ${ref.no} の行が見つかりません`); return null; }
-    const card = itemByRow.get(r);
-    if (ref.name && card && !norm(card.label + card.sub).includes(norm(ref.name)) && norm(card.label) !== norm(ref.name)) {
+    const rs = byKey.get(norm(ref.no ?? ''));
+    if (!rs) { warnings.push(`${what}: キー ${ref.no} の行が見つかりません`); return null; }
+    // 同じキーの行が複数あるときは、項目名が合う行 → 控えの行番号 (_row) が合う行の順に選ぶ
+    const named = rs.filter((r) => itemByRow.get(r) && nameOk(itemByRow.get(r), ref.name));
+    const pick = named.find((r) => r === ref._row) ?? named[0] ?? rs[0];
+    const card = itemByRow.get(pick);
+    if (ref.name && card && !nameOk(card, ref.name)) {
       warnings.push(`${what}: キー ${ref.no} の項目名が「${ref.name}」ではありません (実際: 「${card.label}」)`);
       return null;
     }
@@ -227,6 +231,10 @@ export function buildProfileCards(sheet, profile, targetCol) {
     if (options?.length) { c.options = options; c.type = 'choice'; }
     else if (['number', 'text', 'choice'].includes(ref.type)) c.type = ref.type;
     else warnings.push(`入力方法の指定: キー ${ref.no} の type / options が正しくありません`);
+    // 選べない選択肢 (表示はするが押せない)。"A|B" の文字列でも配列でもよい
+    const disabled = Array.isArray(ref.disabled) ? ref.disabled
+      : typeof ref.disabled === 'string' ? ref.disabled.split('|').map((o) => o.trim()).filter(Boolean) : [];
+    if (disabled.length) c.disabledOptions = disabled;
     if (c.type === 'choice' && !c.options?.length) {
       warnings.push(`入力方法の指定: キー ${ref.no} は選択式ですが選択肢 (options) がありません`);
       c.type = 'text';

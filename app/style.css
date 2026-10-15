@@ -160,6 +160,7 @@ input.field::-webkit-date-and-time-value { text-align: left; }
   font: inherit; font-size: 1.25rem; font-weight: 700; cursor: pointer;
 }
 .choice.prev { border-style: dashed; border-color: var(--muted); }
+.choice:disabled { opacity: .35; cursor: not-allowed; }
 .choice.on { background: var(--primary); border-color: var(--primary); border-style: solid; color: var(--primary-text); }
 .card[data-state="ng"] .choice.on { background: var(--ng); border-color: var(--ng); }
 .card.cond { border: 2px solid var(--primary); background: color-mix(in srgb, var(--primary) 6%, var(--surface)); }

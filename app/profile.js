@@ -1,6 +1,6 @@
 // 点検表ごとの「設定ファイル」(JSON) に従ってカードを組み立てる。
 // 点検表に固有の名前・行・見出しは設定ファイル側だけに書き、このコードには持たない。
-import { colNum, colName, parseRef, displayValue, shiftFormula, baseCard } from './xlsx.js';
+import { colNum, colName, parseRef, displayValue, shiftFormula, baseCard, isRecorded } from './xlsx.js';
 
 export const PROFILE_TYPE = 'inspection-cards-profile';
 
@@ -95,12 +95,12 @@ export function buildProfileCards(sheet, profile, targetCol) {
     if (hasAny) rows.push(r);
   }
 
-  // 記録列: startCol 以降で何か入っている列
+  // 記録列: startCol 以降で何か入っている列 (「-」だけのセルは空とみなす)
   const recStart = colNum(profile.records.startCol);
   const recRows = [...metaRows.map((m) => m.row), ...rows];
   const recordCols = [];
   for (let c = recStart; c <= Math.max(sheet.maxC, recStart); c++) {
-    if (recRows.some((r) => sheet.get(r, c) && !sheet.get(r, c).empty)) recordCols.push(c);
+    if (recRows.some((r) => isRecorded(sheet.get(r, c)))) recordCols.push(c);
   }
   const nextCol = recordCols.length ? recordCols[recordCols.length - 1] + 1 : recStart;
   targetCol ??= nextCol;

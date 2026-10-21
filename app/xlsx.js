@@ -277,6 +277,16 @@ export function parseRange(s) {
   return null;
 }
 
+/**
+ * 記録が入っているセルか (書き込む列を探すとき用)。「-」だけのセルは、あらかじめ引いておく線のことがあるので空とみなす。
+ * 書き込みでは「-」のセルも記入済みとして上書きしない
+ */
+export function isRecorded(cell) {
+  if (!cell || cell.empty) return false;
+  if (cell.hasF) return true;
+  return !/^[-\u2010-\u2015\u2212\u30fc\uff70]+$/.test(displayValue(cell).normalize('NFKC').trim());
+}
+
 export function detectLayout(sheet) {
   // 1. 「日付」ラベルのある列 = ラベル列。その右が記録列
   let labelCol = 0, dateRow = 0;
@@ -331,7 +341,7 @@ export function detectLayout(sheet) {
   const allRows = [...metaRows.map((m) => m.row), ...itemRows];
   const recordCols = [];
   for (let c = labelCol + 1; c <= sheet.maxC; c++) {
-    if (allRows.some((r) => sheet.get(r, c) && !sheet.get(r, c).empty)) recordCols.push(c);
+    if (allRows.some((r) => isRecorded(sheet.get(r, c)))) recordCols.push(c);
   }
   const lastCol = recordCols.length ? recordCols[recordCols.length - 1] : labelCol;
 
